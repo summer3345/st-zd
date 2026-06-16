@@ -1,10 +1,11 @@
 {
-    "display_name": "AI场外指导",
-    "loading_order": 10,
+    "display_name": "Arrebol D 暗河红霞导演系统",
+    "loading_order": 22,
+    "requires": [],
+    "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "YourName",
-    "version": "2.3.0",
-    "description": "定期或手动调用独立模型进行剧情和情感纠偏，作为临时指令注入上下文。",
-    "api": 2
+    "author": "江",
+    "version": "1.0.5.6.5",
+    "description": "独立自动触发计数状态版：基于稳定模板版，自动触发新增计数改用独立 localStorage 状态，避免 settings 合并/刷新导致基线追着当前总数跑；不改注入、API、模板主链路"
 }
