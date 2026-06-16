@@ -1,14 +1,12 @@
 /**
  * Claude Review - AI场外复盘指导插件
- * 
- * 功能：每N轮对话后，调用Claude API进行场外复盘，
- * 将指导内容注入世界书或作为宏变量使用。
+ * 每N轮对话后自动调用Claude API进行场外复盘
  */
 
-// ==================== 模块导入 ====================
+// ==================== 导入 ====================
 import { renderExtensionTemplateAsync } from '../../../../script.js';
 
-// ==================== 常量定义 ====================
+// ==================== 常量 ====================
 const MODULE_NAME = 'claude_review';
 const REVIEW_ENTRY_UID = 999999001;
 
@@ -21,7 +19,6 @@ const defaultSettings = Object.freeze({
     maxTokens: 2048,
     temperature: 0.7,
     triggerInterval: 20,
-    includeUserMessages: true,
     contextRounds: 10,
     autoTrigger: true,
     manualTriggerOnly: false,
@@ -61,12 +58,12 @@ const defaultSettings = Object.freeze({
     debugMode: false,
 });
 
+// ==================== 状态 ====================
 let settings = {};
 let turnCounter = 0;
 let isReviewing = false;
 let lastReviewContent = '';
 let reviewHistory = [];
-let isInitialized = false;
 
 function log(...args) {
     console.log(`[${MODULE_NAME}]`, ...args);
@@ -78,11 +75,13 @@ function debug(...args) {
     }
 }
 
+// ==================== 设置管理 ====================
 function getSettings() {
     const context = SillyTavern.getContext();
     if (!context.extensionSettings[MODULE_NAME]) {
         context.extensionSettings[MODULE_NAME] = structuredClone(defaultSettings);
     }
+    // 合并默认值（处理更新后新增字段）
     for (const key of Object.keys(defaultSettings)) {
         if (!Object.hasOwn(context.extensionSettings[MODULE_NAME], key)) {
             context.extensionSettings[MODULE_NAME][key] = defaultSettings[key];
@@ -96,6 +95,7 @@ function saveSettings() {
     saveSettingsDebounced();
 }
 
+// ==================== 聊天历史 ====================
 function getRecentChatHistory(rounds) {
     const context = SillyTavern.getContext();
     const chat = context.chat || [];
@@ -115,12 +115,13 @@ function getRecentChatHistory(rounds) {
     return { history, charName, userName, currentTurn: messages.length };
 }
 
+// ==================== Claude API ====================
 async function callClaudeAPI(systemPrompt, userPrompt) {
     const model = settings.customModel || settings.model;
     const apiKey = settings.apiKey?.trim();
 
     if (!apiKey) {
-        throw new Error('API Key未设置，请在插件设置中配置');
+        throw new Error('API Key未设置');
     }
 
     const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/v1/messages`;
@@ -151,16 +152,17 @@ async function callClaudeAPI(systemPrompt, userPrompt) {
     }
 
     const data = await response.json();
-    return data.content?.[0]?.text || data.completion || '';
+    return data.content?.[0]?.text || '';
 }
 
+// ==================== 世界书 ====================
 async function getWorldInfoData() {
     try {
         const response = await fetch('/api/worldinfo/get');
         if (!response.ok) return null;
         return await response.json();
     } catch (e) {
-        debug('获取世界书数据失败:', e);
+        debug('获取世界书失败:', e);
         return null;
     }
 }
@@ -176,7 +178,7 @@ async function updateWorldInfoEntry(content) {
     if (!targetBookName) {
         const books = Object.keys(worldInfoData);
         if (books.length === 0) {
-            throw new Error('没有可用的世界书，请先创建一本世界书');
+            throw new Error('没有可用的世界书');
         }
         targetBookName = books[0];
     }
@@ -249,15 +251,18 @@ async function updateWorldInfoEntry(content) {
     return targetBookName;
 }
 
+// ==================== 宏变量 ====================
 function registerReviewMacro() {
     try {
         const { macros } = SillyTavern.getContext();
-        macros.register(settings.macroName, {
-            description: 'Claude复盘指导内容',
-            category: macros.category.UTILITY,
-            handler: () => lastReviewContent || '（暂无复盘内容）',
-        });
-        log('宏变量已注册:', `{{${settings.macroName}}}`);
+        if (macros && macros.register) {
+            macros.register(settings.macroName, {
+                description: 'Claude复盘指导内容',
+                category: macros.category?.UTILITY || 'utility',
+                handler: () => lastReviewContent || '（暂无复盘内容）',
+            });
+            log('宏变量已注册:', `{{${settings.macroName}}}`);
+        }
     } catch (e) {
         debug('注册宏失败:', e);
     }
@@ -266,27 +271,23 @@ function registerReviewMacro() {
 function unregisterReviewMacro() {
     try {
         const { macros } = SillyTavern.getContext();
-        macros.registry.unregisterMacro(settings.macroName);
+        if (macros && macros.registry) {
+            macros.registry.unregisterMacro(settings.macroName);
+        }
     } catch (e) {
         debug('注销宏失败:', e);
     }
 }
 
+// ==================== 核心复盘 ====================
 async function performReview(force = false) {
     if (isReviewing) {
-        log('复盘正在进行中，跳过');
+        log('复盘正在进行中');
         return;
     }
 
-    if (!settings.enabled) {
-        log('插件已禁用');
-        return;
-    }
-
-    if (!force && settings.manualTriggerOnly) {
-        log('仅手动触发模式，跳过自动复盘');
-        return;
-    }
+    if (!settings.enabled) return;
+    if (!force && settings.manualTriggerOnly) return;
 
     isReviewing = true;
     const { loader, toastr } = SillyTavern.getContext();
@@ -304,7 +305,7 @@ async function performReview(force = false) {
         const { history, charName, userName, currentTurn } = getRecentChatHistory(settings.contextRounds);
 
         if (!history.trim()) {
-            log('没有足够的历史对话用于复盘');
+            log('没有足够的历史对话');
             return;
         }
 
@@ -315,8 +316,6 @@ async function performReview(force = false) {
             .replace(/{currentTurn}/g, currentTurn)
             .replace(/{chatHistory}/g, history);
 
-        debug('复盘提示词长度:', userPrompt.length);
-
         const reviewContent = await callClaudeAPI(settings.systemPrompt, userPrompt);
 
         if (!reviewContent.trim()) {
@@ -324,29 +323,17 @@ async function performReview(force = false) {
         }
 
         lastReviewContent = reviewContent;
-
-        reviewHistory.push({
-            turn: currentTurn,
-            timestamp: Date.now(),
-            content: reviewContent,
-        });
-
-        if (reviewHistory.length > 50) {
-            reviewHistory = reviewHistory.slice(-50);
-        }
+        reviewHistory.push({ turn: currentTurn, timestamp: Date.now(), content: reviewContent });
+        if (reviewHistory.length > 50) reviewHistory = reviewHistory.slice(-50);
 
         if (settings.outputMode === 'world_info' || settings.outputMode === 'both') {
             try {
                 const bookName = await updateWorldInfoEntry(reviewContent);
                 log(`复盘已写入世界书: ${bookName}`);
-                if (settings.showNotification) {
-                    toastr.success(`复盘已更新至世界书「${bookName}」`);
-                }
+                if (settings.showNotification) toastr.success(`复盘已更新至世界书「${bookName}」`);
             } catch (e) {
-                log('写入世界书失败:', e);
-                if (settings.showNotification) {
-                    toastr.warning(`世界书写入失败: ${e.message}`);
-                }
+                log('世界书写入失败:', e);
+                if (settings.showNotification) toastr.warning(`世界书写入失败: ${e.message}`);
             }
         }
 
@@ -376,17 +363,14 @@ async function performReview(force = false) {
 
     } catch (error) {
         log('复盘失败:', error);
-        if (settings.showNotification) {
-            toastr.error(`复盘失败: ${error.message}`);
-        }
+        if (settings.showNotification) toastr.error(`复盘失败: ${error.message}`);
     } finally {
         isReviewing = false;
-        if (loaderHandle) {
-            await loaderHandle.hide();
-        }
+        if (loaderHandle) await loaderHandle.hide();
     }
 }
 
+// ==================== 事件监听 ====================
 function onMessageReceived(data) {
     if (!settings.enabled || settings.manualTriggerOnly) return;
     if (isReviewing) return;
@@ -399,7 +383,7 @@ function onMessageReceived(data) {
         debug(`AI回复计数: ${turnCounter}/${settings.triggerInterval}`);
 
         if (turnCounter >= settings.triggerInterval) {
-            log(`达到触发轮次 (${turnCounter}/${settings.triggerInterval})，开始复盘`);
+            log(`达到触发轮次，开始复盘`);
             setTimeout(() => performReview(), 500);
         }
     }
@@ -411,9 +395,8 @@ function onChatChanged() {
     debug('聊天切换，计数器重置');
 }
 
+// ==================== UI设置面板 ====================
 async function setupSettingsPanel() {
-    const context = SillyTavern.getContext();
-
     try {
         const settingsHtml = await renderExtensionTemplateAsync(
             `third-party/${MODULE_NAME}`,
@@ -421,26 +404,20 @@ async function setupSettingsPanel() {
             { MODULE_NAME }
         );
 
-        // 兼容PC端和移动端 - 尝试多个可能的容器
-        let $container = $('#extensions_settings2');
-        if ($container.length === 0) {
-            $container = $('#extensions_settings');
+        // 关键：必须插入到 #extensions_settings2 才能显示在扩展管理界面
+        const $container = $('#extensions_settings2');
+        if ($container.length) {
+            $container.append(settingsHtml);
+            log('设置面板已附加到 #extensions_settings2');
+        } else {
+            log('警告: 未找到 #extensions_settings2');
+            // 兜底尝试
+            const $fallback = $('#extensions_settings, .extensions_settings').first();
+            if ($fallback.length) {
+                $fallback.append(settingsHtml);
+                log('设置面板已附加到备用容器');
+            }
         }
-        if ($container.length === 0) {
-            $container = $('.extensions_settings').first();
-        }
-        if ($container.length === 0) {
-            // 移动端SillyDroid可能使用不同的结构
-            $container = $('[id*="extensions_settings"]').first();
-        }
-        if ($container.length === 0) {
-            // 最后兜底：创建容器并附加到body
-            const $panel = $('<div id="extensions_settings2" style="display:none;"></div>');
-            $('body').append($panel);
-            $container = $panel;
-        }
-
-        $container.append(settingsHtml);
 
         bindSettingsUI();
         loadSettingsToUI();
@@ -455,7 +432,6 @@ function initCollapsiblePanels() {
     $(document).off('click.cr-drawer').on('click.cr-drawer', '.claude-review-settings .inline-drawer-toggle', function() {
         const $content = $(this).next('.inline-drawer-content');
         const $icon = $(this).find('.inline-drawer-icon');
-
         if ($content.is(':visible')) {
             $content.slideUp(200);
             $icon.removeClass('down').addClass('up');
@@ -465,7 +441,6 @@ function initCollapsiblePanels() {
         }
     });
 
-    // 默认展开
     $('.claude-review-settings .inline-drawer-content').show();
     $('.claude-review-settings .inline-drawer-icon').addClass('down');
 }
@@ -479,113 +454,32 @@ function bindSettingsUI() {
         saveSettings();
     });
 
-    $(`${ns}_api_key`).on('input', function() {
-        settings.apiKey = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_api_base`).on('input', function() {
-        settings.apiBaseUrl = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_model`).on('change', function() {
-        settings.model = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_custom_model`).on('input', function() {
-        settings.customModel = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_max_tokens`).on('input', function() {
-        settings.maxTokens = parseInt($(this).val()) || 2048;
-        saveSettings();
-    });
-
-    $(`${ns}_temperature`).on('input', function() {
-        settings.temperature = parseFloat($(this).val()) || 0.7;
-        saveSettings();
-    });
-
-    $(`${ns}_interval`).on('input', function() {
-        settings.triggerInterval = parseInt($(this).val()) || 20;
-        saveSettings();
-    });
-
-    $(`${ns}_context_rounds`).on('input', function() {
-        settings.contextRounds = parseInt($(this).val()) || 10;
-        saveSettings();
-    });
-
-    $(`${ns}_auto_trigger`).on('change', function() {
-        settings.autoTrigger = $(this).prop('checked');
-        saveSettings();
-    });
-
-    $(`${ns}_manual_only`).on('change', function() {
-        settings.manualTriggerOnly = $(this).prop('checked');
-        saveSettings();
-    });
-
-    $(`${ns}_system_prompt`).on('input', function() {
-        settings.systemPrompt = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_user_prompt`).on('input', function() {
-        settings.userPromptTemplate = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_output_mode`).on('change', function() {
-        settings.outputMode = $(this).val();
-        updateOutputUI();
-        saveSettings();
-    });
-
-    $(`${ns}_wi_book`).on('input', function() {
-        settings.worldInfoBook = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_wi_entry_name`).on('input', function() {
-        settings.worldInfoEntryName = $(this).val();
-        saveSettings();
-    });
-
-    $(`${ns}_wi_position`).on('input', function() {
-        settings.worldInfoPosition = parseInt($(this).val()) || 0;
-        saveSettings();
-    });
-
+    $(`${ns}_api_key`).on('input', function() { settings.apiKey = $(this).val(); saveSettings(); });
+    $(`${ns}_api_base`).on('input', function() { settings.apiBaseUrl = $(this).val(); saveSettings(); });
+    $(`${ns}_model`).on('change', function() { settings.model = $(this).val(); saveSettings(); });
+    $(`${ns}_custom_model`).on('input', function() { settings.customModel = $(this).val(); saveSettings(); });
+    $(`${ns}_max_tokens`).on('input', function() { settings.maxTokens = parseInt($(this).val()) || 2048; saveSettings(); });
+    $(`${ns}_temperature`).on('input', function() { settings.temperature = parseFloat($(this).val()) || 0.7; saveSettings(); });
+    $(`${ns}_interval`).on('input', function() { settings.triggerInterval = parseInt($(this).val()) || 20; saveSettings(); });
+    $(`${ns}_context_rounds`).on('input', function() { settings.contextRounds = parseInt($(this).val()) || 10; saveSettings(); });
+    $(`${ns}_auto_trigger`).on('change', function() { settings.autoTrigger = $(this).prop('checked'); saveSettings(); });
+    $(`${ns}_manual_only`).on('change', function() { settings.manualTriggerOnly = $(this).prop('checked'); saveSettings(); });
+    $(`${ns}_system_prompt`).on('input', function() { settings.systemPrompt = $(this).val(); saveSettings(); });
+    $(`${ns}_user_prompt`).on('input', function() { settings.userPromptTemplate = $(this).val(); saveSettings(); });
+    $(`${ns}_output_mode`).on('change', function() { settings.outputMode = $(this).val(); updateOutputUI(); saveSettings(); });
+    $(`${ns}_wi_book`).on('input', function() { settings.worldInfoBook = $(this).val(); saveSettings(); });
+    $(`${ns}_wi_entry_name`).on('input', function() { settings.worldInfoEntryName = $(this).val(); saveSettings(); });
+    $(`${ns}_wi_position`).on('input', function() { settings.worldInfoPosition = parseInt($(this).val()) || 0; saveSettings(); });
     $(`${ns}_macro_name`).on('input', function() {
         unregisterReviewMacro();
         settings.macroName = $(this).val() || 'claude_review';
         registerReviewMacro();
         saveSettings();
     });
-
-    $(`${ns}_show_notif`).on('change', function() {
-        settings.showNotification = $(this).prop('checked');
-        saveSettings();
-    });
-
-    $(`${ns}_inject_system`).on('change', function() {
-        settings.injectAsSystemMessage = $(this).prop('checked');
-        saveSettings();
-    });
-
-    $(`${ns}_lock_rp`).on('change', function() {
-        settings.reviewLockRP = $(this).prop('checked');
-        saveSettings();
-    });
-
-    $(`${ns}_debug`).on('change', function() {
-        settings.debugMode = $(this).prop('checked');
-        saveSettings();
-    });
+    $(`${ns}_show_notif`).on('change', function() { settings.showNotification = $(this).prop('checked'); saveSettings(); });
+    $(`${ns}_inject_system`).on('change', function() { settings.injectAsSystemMessage = $(this).prop('checked'); saveSettings(); });
+    $(`${ns}_lock_rp`).on('change', function() { settings.reviewLockRP = $(this).prop('checked'); saveSettings(); });
+    $(`${ns}_debug`).on('change', function() { settings.debugMode = $(this).prop('checked'); saveSettings(); });
 
     $(`${ns}_manual_review`).on('click', async function() {
         const $btn = $(this);
@@ -598,10 +492,7 @@ function bindSettingsUI() {
         const $btn = $(this);
         $btn.prop('disabled', true).text('测试中...');
         try {
-            const result = await callClaudeAPI(
-                '你是一个测试助手，请回复"API连接成功"。',
-                '测试连接'
-            );
+            const result = await callClaudeAPI('你是一个测试助手，请回复"API连接成功"。', '测试连接');
             toastr.success(`API测试成功: ${result.substring(0, 50)}...`);
         } catch (e) {
             toastr.error(`API测试失败: ${e.message}`);
@@ -615,22 +506,14 @@ function bindSettingsUI() {
     });
 
     $(`${ns}_view_last`).on('click', function() {
-        if (!lastReviewContent) {
-            toastr.warning('暂无复盘内容');
-            return;
-        }
+        if (!lastReviewContent) { toastr.warning('暂无复盘内容'); return; }
         const { Popup, POPUP_TYPE } = SillyTavern.getContext();
-        Popup.show(POPUP_TYPE.DISPLAY, lastReviewContent, {
-            title: '上次复盘内容',
-            wide: true,
-            large: true,
-        });
+        Popup.show(POPUP_TYPE.DISPLAY, lastReviewContent, { title: '上次复盘内容', wide: true, large: true });
     });
 }
 
 function loadSettingsToUI() {
     const ns = `#${MODULE_NAME}`;
-
     $(`${ns}_enabled`).prop('checked', settings.enabled);
     $(`${ns}_api_key`).val(settings.apiKey || '');
     $(`${ns}_api_base`).val(settings.apiBaseUrl);
@@ -653,7 +536,6 @@ function loadSettingsToUI() {
     $(`${ns}_inject_system`).prop('checked', settings.injectAsSystemMessage);
     $(`${ns}_lock_rp`).prop('checked', settings.reviewLockRP);
     $(`${ns}_debug`).prop('checked', settings.debugMode);
-
     updateOutputUI();
     updateStatusBadge();
 }
@@ -666,6 +548,7 @@ function updateOutputUI() {
 
 function updateStatusBadge() {
     const $badge = $(`#${MODULE_NAME}_status`);
+    if (!$badge.length) return;
     if (settings.enabled) {
         $badge.text('运行中').removeClass('inactive').addClass('active');
     } else {
@@ -673,16 +556,14 @@ function updateStatusBadge() {
     }
 }
 
+// ==================== 斜杠命令 ====================
 function registerSlashCommands() {
     try {
         const { SlashCommandParser, SlashCommand } = SillyTavern.getContext();
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'claude-review',
-            callback: async () => {
-                await performReview(true);
-                return '复盘完成';
-            },
+            callback: async () => { await performReview(true); return '复盘完成'; },
             aliases: ['cr'],
             returns: '复盘状态',
             helpString: '手动触发Claude场外复盘。用法: /claude-review 或 /cr',
@@ -697,25 +578,22 @@ function registerSlashCommands() {
             },
             aliases: ['crs'],
             returns: '复盘状态',
-            helpString: '查看当前复盘状态。用法: /crs',
+            helpString: '查看当前复盘状态',
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'claude-review-reset',
-            callback: () => {
-                turnCounter = 0;
-                return '计数器已重置';
-            },
+            callback: () => { turnCounter = 0; return '计数器已重置'; },
             aliases: ['crr'],
             returns: '操作结果',
-            helpString: '重置复盘轮次计数器。用法: /crr',
+            helpString: '重置复盘轮次计数器',
         }));
     } catch (e) {
         log('斜杠命令注册失败:', e);
     }
 }
 
-// ==================== 生命周期钩子 ====================
+// ==================== 生命周期钩子（供酒馆调用） ====================
 export async function onInstall() {
     log('首次安装');
 }
@@ -725,7 +603,7 @@ export async function onUpdate() {
 }
 
 export async function onDelete() {
-    log('插件删除，清理');
+    log('插件删除');
     unregisterReviewMacro();
 }
 
@@ -754,19 +632,28 @@ export async function onActivate() {
     log('插件激活完成');
 }
 
-// ==================== 主入口 ====================
+// ==================== 第三方扩展自行初始化（关键！） ====================
+// 第三方扩展的 hooks.activate 不会自动触发，必须自行初始化
 jQuery(async () => {
-    log('正在加载...');
+    log('正在初始化...');
 
     const { eventSource, event_types } = SillyTavern.getContext();
 
     const init = async () => {
-        if (isInitialized) return;
-        isInitialized = true;
-
         settings = getSettings();
         await setupSettingsPanel();
-        log('设置面板已加载');
+
+        // 也执行激活逻辑（因为第三方扩展的activate hook可能不触发）
+        const { eventSource: es, event_types: et } = SillyTavern.getContext();
+        es.on(et.MESSAGE_RECEIVED, onMessageReceived);
+        es.on(et.CHAT_CHANGED, onChatChanged);
+
+        if (settings.outputMode === 'macro' || settings.outputMode === 'both') {
+            registerReviewMacro();
+        }
+
+        registerSlashCommands();
+        log('初始化完成');
     };
 
     if (document.readyState === 'complete') {
