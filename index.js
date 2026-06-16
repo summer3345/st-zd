@@ -70,7 +70,7 @@
                         <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
-                        <label>API 基础 URL (如: https://api.openai.com/v1):</label>
+                        <label>API 基础 URL:</label>
                         <input id="guidance-api-url" type="text" class="text_pole" placeholder="https://api.openai.com/v1">
                         <label>API Key:</label>
                         <input id="guidance-api-key" type="password" class="text_pole" placeholder="sk-...">
@@ -138,58 +138,74 @@
         toastr.success('场外指导设置已保存');
     }
 
-    // --- 拉取模型列表 (采用参考脚本逻辑) ---
+    // --- 拉取模型列表 (原样照搬参考脚本 fetchModelsAndConnect) ---
     async function fetchModels() {
         const apiUrl = $('#guidance-api-url').val().trim();
-        const apiKey = $('#guidance-api-key').val().trim();
-        if (!apiUrl) return toastr.warning('请先输入 API URL');
-
-        $('#guidance-status').text('⏳ 正在拉取模型...');
+        const apiKey = $('#guidance-api-key').val();
         
+        if (!apiUrl) {
+            toastr.warning("请输入API基础URL。");
+            return;
+        }
+
         let modelsUrl = apiUrl;
-        if (!modelsUrl.endsWith('/')) { modelsUrl += '/'; }
-        if (modelsUrl.includes('generativelanguage.googleapis.com')) {
+        if (!apiUrl.endsWith('/')) { modelsUrl += '/'; }
+        // Special handling for Google's OpenAI-compatible endpoint
+        if (apiUrl.includes('generativelanguage.googleapis.com')) {
             if (!modelsUrl.endsWith('models')) { modelsUrl += 'models'; }
-        } else {
+        } else { // Default OpenAI logic
             if (modelsUrl.endsWith('/v1/')) { modelsUrl += 'models'; }
             else if (!modelsUrl.endsWith('models')) { modelsUrl += 'v1/models';}
         }
 
-        console.log('[Guidance] 正在请求模型列表 URL:', modelsUrl);
+        $('#guidance-status').text("⏳ 正在加载模型列表...");
         try {
             const headers = { 'Content-Type': 'application/json' };
-            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-            const resp = await fetch(modelsUrl, { headers });
-            if (!resp.ok) {
-                const errText = await resp.text();
-                throw new Error(`获取模型列表失败: ${resp.status} ${resp.statusText}. 详情: ${errText}`);
+            if (apiKey) { headers['Authorization'] = `Bearer ${apiKey}`; }
+            const response = await fetch(modelsUrl, { method: 'GET', headers: headers });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`获取模型列表失败: ${response.status} ${response.statusText}. 详情: ${errorText}`);
             }
-            const data = await resp.json();
+            const data = await response.json();
+            console.log("[Guidance] 获取到的模型数据:", data);
             
             const select = $('#guidance-model-select').empty();
             let modelsFound = false;
+            
             if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
                 modelsFound = true;
-                data.data.forEach(m => { if(m.id) select.append(new Option(m.id, m.id)); });
+                data.data.forEach(model => {
+                    if (model.id) {
+                        select.append(new Option(model.id, model.id));
+                    }
+                });
             } else if (data && Array.isArray(data) && data.length > 0) {
                 modelsFound = true;
-                data.forEach(m => {
-                    if(typeof m === 'string') select.append(new Option(m, m));
-                    else if(m.id) select.append(new Option(m.id, m.id));
+                data.forEach(model => {
+                    if (typeof model === 'string') { select.append(new Option(model, model)); }
+                    else if (model.id) { select.append(new Option(model.id, model.id)); }
                 });
             }
 
             if (modelsFound) {
-                if (settings.model) select.val(settings.model);
-                $('#guidance-status').text('✅ 模型拉取成功');
-                toastr.success('模型列表已更新');
+                if (settings.model && select.find(`option[value="${settings.model}"]`).length > 0) {
+                    select.val(settings.model);
+                } else {
+                    select.prepend(new Option('请选择一个模型', '', true, true));
+                }
+                toastr.success("模型列表加载成功！");
+                $('#guidance-status').text("✅ 模型列表加载成功！");
             } else {
-                throw new Error('未能解析模型数据或列表为空');
+                select.append(new Option('未能解析模型数据或列表为空', ''));
+                toastr.warning("未能解析模型数据或列表为空。");
+                $('#guidance-status').text("❌ 未能解析模型数据或列表为空。");
             }
-        } catch (e) {
-            console.error("[Guidance] Fetch Models Error:", e);
-            toastr.error('拉取模型失败: ' + e.message);
-            $('#guidance-status').text('❌ 拉取失败，请检查F12控制台');
+        } catch (error) {
+            console.error("[Guidance] 加载模型列表时出错:", error);
+            toastr.error(`加载模型列表失败: ${error.message}`);
+            select.empty().append(new Option('加载模型失败', ''));
+            $('#guidance-status').text(`❌ 加载模型失败: ${error.message}`);
         }
     }
 
@@ -218,7 +234,7 @@
         return promptParts.join('\n\n');
     }
 
-    // --- 调用指导模型 API (采用参考脚本逻辑) ---
+    // --- 调用指导模型 API (原样照搬参考脚本 callCustomOpenAI) ---
     async function callGuidanceAPI(userPrompt) {
         if (!settings.apiUrl || !settings.model) {
             toastr.warning('请先配置并保存场外指导的 API 和模型');
@@ -227,35 +243,39 @@
 
         let fullApiUrl = settings.apiUrl;
         if (!fullApiUrl.endsWith('/')) { fullApiUrl += '/'; }
+        // Special handling for Google's OpenAI-compatible endpoint
         if (fullApiUrl.includes('generativelanguage.googleapis.com')) {
             if (!fullApiUrl.endsWith('chat/completions')) { fullApiUrl += 'chat/completions'; }
-        } else {
+        } else { // Default OpenAI logic
             if (fullApiUrl.endsWith('/v1/')) { fullApiUrl += 'chat/completions'; }
             else if (!fullApiUrl.includes('/chat/completions')) { fullApiUrl += 'v1/chat/completions';}
         }
 
-        console.log('[Guidance] 正在请求聊天补全 URL:', fullApiUrl, '模型:', settings.model);
-
-        const body = {
-            model: settings.model,
-            messages: [
-                { role: "system", content: settings.systemPrompt },
-                { role: "user", content: userPrompt }
-            ],
-            stream: false
-        };
-
         const headers = { 'Content-Type': 'application/json' };
-        if (settings.apiKey) headers['Authorization'] = `Bearer ${settings.apiKey}`;
+        if (settings.apiKey) { headers['Authorization'] = `Bearer ${settings.apiKey}`; }
+        const body = JSON.stringify({
+            model: settings.model,
+            messages: [ { role: "system", content: settings.systemPrompt }, { role: "user", content: userPrompt } ],
+            stream: false, // Explicitly disable streaming
+        });
+        
+        console.log("[Guidance] 调用API:", fullApiUrl, "模型:", settings.model, "附带头部信息:", headers);
 
         try {
-            const response = await fetch(fullApiUrl, { method: 'POST', headers, body: JSON.stringify(body) });
+            const response = await fetch(fullApiUrl, { method: 'POST', headers: headers, body: body });
             if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`API请求失败: ${response.status} ${response.statusText}. 详情: ${errorText}`);
+                console.error("[Guidance] 自定义API调用失败:", response.status, response.statusText, errorText);
+                throw new Error(`自定义API请求失败: ${response.status} ${response.statusText}. 详情: ${errorText}`);
             }
             const data = await response.json();
-            return data.choices[0].message.content.trim();
+            console.log("[Guidance] 自定义API响应:", data);
+            if (data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
+                return data.choices[0].message.content.trim();
+            } else {
+                console.error("[Guidance] 自定义API响应格式不正确或无内容:", data);
+                throw new Error("自定义API响应格式不正确或未返回内容。");
+            }
         } catch (e) {
             console.error("[Guidance] API Call Failed:", e);
             toastr.error(`场外指导生成失败: ${e.message}`);
@@ -338,7 +358,7 @@
         loadSettings();
         eventSource().on(event_types().MESSAGE_RECEIVED, onMessageReceived);
         eventSource().on(event_types().CHAT_CHANGED, onChatChanged);
-        console.log("AI场外指导插件 v2.2 (URL终极修复版) 已加载");
+        console.log("AI场外指导插件 v2.3 (原版API逻辑) 已加载");
     });
 
 })();
