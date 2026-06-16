@@ -1,108 +1,40 @@
-/* RP Coach 扩展样式 */
-.rp-coach-settings {
-    padding: 5px;
+/* 针对“场外指导”系统消息的特殊样式 */
+.mes[is_system="true"].guidance-card {
+    border: 1px dashed #5A95D6 !important;
+    background-color: rgba(20, 30, 50, 0.85) !important;
+    border-radius: 10px !important;
+    padding: 10px 15px !important;
+    margin: 10px 0 !important;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    max-width: 90%;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    float: none !important;
 }
 
-.rp_coach_block {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 12px;
+/* 隐藏默认的系统标签和名称框 */
+.guidance-card .name_text {
+    display: none !important;
+}
+.guidance-card .mes_block {
+    margin-left: 0 !important;
 }
 
-.rp_coach_block label {
+/* 卡片头部样式 */
+.guidance-card-header {
+    color: #A8D8FF;
     font-weight: bold;
-    margin-top: 6px;
-    color: #e0e0e0;
-}
-
-.rp_coach_block input,
-.rp_coach_block select,
-.rp_coach_block textarea {
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.rp_coach_block small {
-    color: #888;
-    font-size: 0.8em;
-    line-height: 1.4;
-}
-
-.rp_coach_block small code {
-    background: rgba(255,255,255,0.1);
-    padding: 1px 4px;
-    border-radius: 3px;
-    color: #aad;
-}
-
-.rp_coach_output_config {
-    background: rgba(0,0,0,0.2);
-    padding: 10px;
-    border-radius: 6px;
-    margin-top: 6px;
-    border: 1px solid rgba(255,255,255,0.05);
-}
-
-.rp_coach_stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    background: rgba(0,0,0,0.15);
-    padding: 8px 12px;
-    border-radius: 6px;
-    margin-bottom: 8px;
-}
-
-.rp_coach_stats span {
     font-size: 0.9em;
-    color: #ccc;
-}
-
-.rp_coach_stats b {
-    color: #fff;
-}
-
-#rp_coach_trigger_btn {
-    background: linear-gradient(135deg, #2d8a5e, #1e6b47);
-    color: white;
-    font-weight: bold;
-    border: none;
-    padding: 8px 16px;
-    transition: opacity 0.2s;
-}
-
-#rp_coach_trigger_btn:hover {
-    opacity: 0.9;
-}
-
-#rp_coach_test_api {
-    background: linear-gradient(135deg, #3a6ea5, #2a5080);
-    color: white;
-    border: none;
-    margin-top: 4px;
-    align-self: flex-start;
-}
-
-#rp_coach_reset_stats {
-    background: rgba(255,255,255,0.1);
-    color: #ccc;
-    border: 1px solid rgba(255,255,255,0.1);
-    align-self: flex-start;
-}
-
-.rp_coach_primary_btn {
-    margin-top: 4px;
-}
-
-/* 复选框样式微调 */
-.rp_coach_block .checkbox_label {
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    cursor: pointer;
+    gap: 5px;
 }
 
-.rp_coach_block .checkbox_label input[type="checkbox"] {
-    width: auto;
+/* 卡片内容样式 */
+.guidance-card-content {
+    color: #E0E0E0;
+    font-size: 0.95em;
+    line-height: 1.5;
+    white-space: pre-wrap;
 }

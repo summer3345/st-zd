@@ -1,0 +1,10 @@
+{
+    "display_name": "AI场外指导",
+    "loading_order": 10,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "YourName",
+    "version": "1.0.0",
+    "description": "定期调用独立模型进行剧情和情感纠偏，并在下次发送时作为临时指令注入上下文。",
+    "api": 2
+}
