@@ -1,0 +1,195 @@
+/* Claude Review 插件样式 */
+
+.claude-review-settings {
+    padding: 10px 0;
+}
+
+.claude-review-settings .inline-drawer-toggle {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
+    border-radius: 6px;
+    margin-bottom: 4px;
+}
+
+.claude-review-settings .inline-drawer-toggle:hover {
+    background: var(--SmartThemeEmColor, rgba(255, 255, 255, 0.1));
+}
+
+.claude-review-settings .inline-drawer-content {
+    padding: 10px 12px;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+    border-radius: 0 0 6px 6px;
+    margin-bottom: 10px;
+}
+
+.claude-review-settings .inline-drawer-icon {
+    transition: transform 0.3s ease;
+}
+
+.claude-review-settings .inline-drawer-icon.down {
+    transform: rotate(0deg);
+}
+
+.claude-review-settings .inline-drawer-icon.up {
+    transform: rotate(180deg);
+}
+
+.claude-review-settings .cr-section {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
+}
+
+.claude-review-settings .cr-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.claude-review-settings .cr-section-title {
+    font-weight: bold;
+    font-size: 14px;
+    color: var(--SmartThemeBodyColor, #fff);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.claude-review-settings .cr-section-title i {
+    color: var(--SmartThemeEmColor, #d4a373);
+}
+
+.claude-review-settings .cr-form-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 10px;
+}
+
+.claude-review-settings .cr-form-row label {
+    min-width: 100px;
+    font-size: 13px;
+    color: var(--SmartThemeBodyColor, #ccc);
+    flex-shrink: 0;
+}
+
+.claude-review-settings .cr-form-row input[type="text"],
+.claude-review-settings .cr-form-row input[type="number"],
+.claude-review-settings .cr-form-row input[type="password"],
+.claude-review-settings .cr-form-row select,
+.claude-review-settings .cr-form-row textarea {
+    flex: 1;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: var(--SmartThemeBodyColor, #fff);
+    font-size: 13px;
+    outline: none;
+}
+
+.claude-review-settings .cr-form-row input:focus,
+.claude-review-settings .cr-form-row select:focus,
+.claude-review-settings .cr-form-row textarea:focus {
+    border-color: var(--SmartThemeEmColor, #d4a373);
+}
+
+.claude-review-settings .cr-form-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--SmartThemeEmColor, #d4a373);
+}
+
+.claude-review-settings .cr-form-row textarea {
+    min-height: 120px;
+    resize: vertical;
+    font-family: monospace;
+    line-height: 1.5;
+}
+
+.claude-review-settings .cr-form-row .cr-hint {
+    font-size: 11px;
+    color: var(--SmartThemeBlurTintColor, #888);
+    margin-top: 4px;
+    flex-basis: 100%;
+    margin-left: 110px;
+}
+
+.claude-review-settings .cr-btn-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.claude-review-settings .cr-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
+    color: var(--SmartThemeBodyColor, #fff);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.claude-review-settings .cr-btn:hover {
+    background: var(--SmartThemeEmColor, rgba(212, 163, 115, 0.2));
+    border-color: var(--SmartThemeEmColor, #d4a373);
+}
+
+.claude-review-settings .cr-btn.primary {
+    background: var(--SmartThemeEmColor, #d4a373);
+    color: #000;
+    border-color: var(--SmartThemeEmColor, #d4a373);
+}
+
+.claude-review-settings .cr-btn.primary:hover {
+    background: #e8b88a;
+}
+
+.claude-review-settings .cr-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.claude-review-settings .cr-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.claude-review-settings .cr-status-badge.active {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+    border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+.claude-review-settings .cr-status-badge.inactive {
+    background: rgba(244, 67, 54, 0.2);
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.4);
+}
+
+.claude-review-settings .cr-variable-tag {
+    display: inline-block;
+    background: rgba(100, 100, 255, 0.15);
+    color: #aab8ff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: monospace;
+    margin: 0 2px;
+}
+
+.claude-review-settings .cr-divider {
+    height: 1px;
+    background: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
+    margin: 12px 0;
+}

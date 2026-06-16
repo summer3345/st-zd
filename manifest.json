@@ -1,0 +1,25 @@
+{
+    "display_name": "Claude Review - AI场外复盘指导",
+    "loading_order": 50,
+    "requires": [],
+    "optional": [],
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Claude Review Team",
+    "version": "1.0.0",
+    "homePage": "https://github.com/your-username/sillytavern-claude-review",
+    "auto_update": true,
+    "minimum_client_version": "1.12.0",
+    "i18n": {
+        "zh-cn": "i18n/zh-cn.json"
+    },
+    "hooks": {
+        "install": "onInstall",
+        "update": "onUpdate",
+        "delete": "onDelete",
+        "enable": "onEnable",
+        "disable": "onDisable",
+        "activate": "onActivate"
+    }
+}

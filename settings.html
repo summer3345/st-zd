@@ -1,0 +1,230 @@
+<div class="claude-review-settings" id="{{MODULE_NAME}}_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>🎯 Claude Review - AI场外复盘指导</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+
+            <!-- 总开关 -->
+            <div class="cr-section">
+                <div class="cr-form-row">
+                    <label>启用插件</label>
+                    <input id="{{MODULE_NAME}}_enabled" type="checkbox" checked />
+                    <span id="{{MODULE_NAME}}_status" class="cr-status-badge active">运行中</span>
+                </div>
+            </div>
+
+            <!-- API设置 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-key"></i> API设置
+                </div>
+
+                <div class="cr-form-row">
+                    <label>API Base URL</label>
+                    <input id="{{MODULE_NAME}}_api_base" type="text" value="https://api.anthropic.com" />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    默认使用Anthropic官方API，也可填入第三方代理地址
+                </div>
+
+                <div class="cr-form-row">
+                    <label>API Key</label>
+                    <input id="{{MODULE_NAME}}_api_key" type="password" placeholder="sk-ant-api03-..." />
+                </div>
+
+                <div class="cr-form-row">
+                    <label>模型选择</label>
+                    <select id="{{MODULE_NAME}}_model">
+                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (推荐)</option>
+                        <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (旧版)</option>
+                        <option value="claude-3-opus-20240229">Claude 3 Opus (最强)</option>
+                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                        <option value="claude-3-haiku-20240307">Claude 3 Haiku (快速)</option>
+                        <option value="custom">自定义模型</option>
+                    </select>
+                </div>
+
+                <div class="cr-form-row">
+                    <label>自定义模型</label>
+                    <input id="{{MODULE_NAME}}_custom_model" type="text" placeholder="选择"custom"时填写" />
+                </div>
+
+                <div class="cr-form-row">
+                    <label>Max Tokens</label>
+                    <input id="{{MODULE_NAME}}_max_tokens" type="number" value="2048" min="256" max="8192" />
+                </div>
+
+                <div class="cr-form-row">
+                    <label>Temperature</label>
+                    <input id="{{MODULE_NAME}}_temperature" type="number" value="0.7" min="0" max="1" step="0.1" />
+                </div>
+
+                <div class="cr-btn-group">
+                    <button id="{{MODULE_NAME}}_test_api" class="cr-btn">
+                        <i class="fa-solid fa-plug"></i> 测试API连接
+                    </button>
+                </div>
+            </div>
+
+            <!-- 触发设置 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-clock"></i> 触发设置
+                </div>
+
+                <div class="cr-form-row">
+                    <label>轮次间隔</label>
+                    <input id="{{MODULE_NAME}}_interval" type="number" value="20" min="1" max="100" />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    每N轮AI回复后触发一次复盘
+                </div>
+
+                <div class="cr-form-row">
+                    <label>复盘上下文轮数</label>
+                    <input id="{{MODULE_NAME}}_context_rounds" type="number" value="10" min="1" max="50" />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    复盘时取最近N轮对话作为上下文
+                </div>
+
+                <div class="cr-form-row">
+                    <label>自动触发</label>
+                    <input id="{{MODULE_NAME}}_auto_trigger" type="checkbox" checked />
+                </div>
+
+                <div class="cr-form-row">
+                    <label>仅手动触发</label>
+                    <input id="{{MODULE_NAME}}_manual_only" type="checkbox" />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    开启后将禁用自动触发，只能通过按钮或命令触发
+                </div>
+            </div>
+
+            <!-- 提示词设置 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-pen-to-square"></i> 提示词设置
+                </div>
+
+                <div class="cr-form-row">
+                    <label>系统提示词</label>
+                    <textarea id="{{MODULE_NAME}}_system_prompt" placeholder="输入系统提示词..."></textarea>
+                </div>
+
+                <div class="cr-form-row">
+                    <label>用户提示词模板</label>
+                    <textarea id="{{MODULE_NAME}}_user_prompt" placeholder="输入用户提示词模板..."></textarea>
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    可用变量: <span class="cr-variable-tag">{charName}</span> <span class="cr-variable-tag">{userName}</span> <span class="cr-variable-tag">{currentTurn}</span> <span class="cr-variable-tag">{contextRounds}</span> <span class="cr-variable-tag">{chatHistory}</span>
+                </div>
+            </div>
+
+            <!-- 输出设置 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-signs-post"></i> 输出设置
+                </div>
+
+                <div class="cr-form-row">
+                    <label>输出模式</label>
+                    <select id="{{MODULE_NAME}}_output_mode">
+                        <option value="world_info">世界书 (World Info)</option>
+                        <option value="macro">宏变量 (Macro)</option>
+                        <option value="both" selected>两者都用</option>
+                    </select>
+                </div>
+
+                <!-- 世界书设置 -->
+                <div class="{{MODULE_NAME}}_wi_settings">
+                    <div class="cr-form-row">
+                        <label>目标世界书</label>
+                        <input id="{{MODULE_NAME}}_wi_book" type="text" placeholder="留空使用默认世界书" />
+                    </div>
+
+                    <div class="cr-form-row">
+                        <label>条目名称</label>
+                        <input id="{{MODULE_NAME}}_wi_entry_name" type="text" value="Claude复盘指导" />
+                    </div>
+
+                    <div class="cr-form-row">
+                        <label>注入深度 (@Depth)</label>
+                        <input id="{{MODULE_NAME}}_wi_position" type="number" value="0" min="0" max="10" />
+                    </div>
+                </div>
+
+                <!-- 宏变量设置 -->
+                <div class="{{MODULE_NAME}}_macro_settings">
+                    <div class="cr-form-row">
+                        <label>宏变量名</label>
+                        <input id="{{MODULE_NAME}}_macro_name" type="text" value="claude_review" />
+                    </div>
+                    <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                        在提示词中使用 <span class="cr-variable-tag">{{claude_review}}</span> 引用复盘内容
+                    </div>
+                </div>
+            </div>
+
+            <!-- 高级设置 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-sliders"></i> 高级设置
+                </div>
+
+                <div class="cr-form-row">
+                    <label>显示通知</label>
+                    <input id="{{MODULE_NAME}}_show_notif" type="checkbox" checked />
+                </div>
+
+                <div class="cr-form-row">
+                    <label>插入系统消息</label>
+                    <input id="{{MODULE_NAME}}_inject_system" type="checkbox" />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    将复盘结果作为系统消息插入聊天记录
+                </div>
+
+                <div class="cr-form-row">
+                    <label>复盘时暂停RP</label>
+                    <input id="{{MODULE_NAME}}_lock_rp" type="checkbox" checked />
+                </div>
+                <div class="cr-hint" style="margin-left:110px; font-size:11px; color:#888;">
+                    复盘期间显示遮罩层，防止误操作
+                </div>
+
+                <div class="cr-form-row">
+                    <label>调试模式</label>
+                    <input id="{{MODULE_NAME}}_debug" type="checkbox" />
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="cr-section">
+                <div class="cr-section-title">
+                    <i class="fa-solid fa-play"></i> 操作
+                </div>
+
+                <div class="cr-btn-group">
+                    <button id="{{MODULE_NAME}}_manual_review" class="cr-btn primary">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> 立即复盘
+                    </button>
+                    <button id="{{MODULE_NAME}}_view_last" class="cr-btn">
+                        <i class="fa-solid fa-eye"></i> 查看上次复盘
+                    </button>
+                    <button id="{{MODULE_NAME}}_reset_counter" class="cr-btn">
+                        <i class="fa-solid fa-rotate-right"></i> 重置计数器
+                    </button>
+                </div>
+
+                <div class="cr-hint" style="margin-top:8px; font-size:11px; color:#888;">
+                    也可使用命令: <span class="cr-variable-tag">/claude-review</span> <span class="cr-variable-tag">/cr</span> | <span class="cr-variable-tag">/claude-review-status</span> <span class="cr-variable-tag">/crs</span> | <span class="cr-variable-tag">/claude-review-reset</span> <span class="cr-variable-tag">/crr</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
