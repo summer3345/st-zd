@@ -1,130 +1,106 @@
-# Claude Review - AI场外复盘指导
+# RP Coach - SillyTavern 场外复盘指导插件
 
-SillyTavern 扩展插件，每N轮对话后自动调用 Claude API 进行场外复盘，将指导建议注入世界书或作为宏变量使用。
+> 让另一个大模型定期复盘你的RP对话，自动注入指导建议，解决AI角色过于激进/OOC/崩坏等问题。
 
 ## 功能特性
 
-- 🤖 **AI场外复盘**：每N轮自动触发Claude进行专业RP复盘指导
-- 🔧 **灵活API配置**：支持Anthropic官方API及第三方代理
-- 📊 **多模型支持**：Sonnet/Opus/Haiku，支持自定义模型ID
-- 📖 **世界书注入**：自动覆盖写入指定世界书条目
-- 🏷️ **宏变量支持**：注册 `{{claude_review}}` 宏，可在提示词中引用
-- ⏱️ **智能触发**：自动/手动触发，支持暂停RP等待复盘
-- 📝 **自定义提示词**：完全可编辑的系统提示词和用户模板
-- 🎮 **斜杠命令**：`/claude-review` `/cr` 等快捷命令
+- **独立API调用**：使用与主对话不同的LLM API进行复盘（如主用Gemini RP，复盘用GPT-4/Claude）
+- **自动触发**：每N轮对话自动执行场外复盘
+- **手动触发**：支持 `/rp_coach` 命令随时复盘
+- **智能注入**：支持宏变量 `{{rp_coach}}` 或 Author's Note 注入指导内容
+- **JSON结构化输出**：要求复盘模型输出 analysis / suggestions / injection 三段式结果
 
 ## 安装方法
 
-### 方法一：通过扩展管理器安装
-1. 打开 SillyTavern → 扩展（拼图图标）
-2. 在 "Install extension" 处粘贴本仓库URL
-3. 点击安装并启用
+### 方式一：酒馆扩展界面安装（推荐）
+1. 打开 SillyTavern → Extensions → Install Extension
+2. 输入本仓库URL（如 `https://github.com/yourname/rp-coach`）
+3. 点击 Install，酒馆会自动下载并加载
 
-### 方法二：手动安装
-1. 将本仓库克隆到 `data/<user>/extensions/` 或 `public/scripts/extensions/third-party/`
-2. 目录名建议为 `claude-review`
-3. 在扩展管理器中启用
+### 方式二：手动安装
+1. 下载本仓库 ZIP 或 `git clone` 到本地
+2. 将 `rp-coach` 文件夹复制到：
+   - **用户级**：`SillyTavern/data/<用户名>/extensions/rp-coach/`
+   - **全局级**：`SillyTavern/public/scripts/extensions/third-party/rp-coach/`
+3. 重启酒馆或刷新扩展列表
 
-```bash
-# 示例
-cd SillyTavern/public/scripts/extensions/third-party/
-git clone https://github.com/your-username/sillytavern-claude-review.git claude-review
+## 配置说明
+
+### 1. API配置
+- **API URL**：填写兼容OpenAI格式的API端点，如：
+  - OpenAI: `https://api.openai.com/v1/chat/completions`
+  - Claude (通过兼容层): `https://api.anthropic.com/v1/chat/completions`
+  - 本地模型: `http://localhost:5000/v1/chat/completions`
+- **API Key**：对应服务的密钥
+- **模型名称**：如 `gpt-4o-mini`, `claude-3-haiku-20240307`, `qwen2.5-7b-instruct`
+
+### 2. 触发配置
+- **每N轮触发**：默认20轮，对话轮次达到此值时自动触发复盘
+- **触发模式**：
+  - `自动`：达到轮次自动后台复盘
+  - `手动`：仅通过按钮或命令触发
+
+### 3. 提示词配置
+默认提示词要求模型输出JSON格式：
+```json
+{
+    "analysis": "问题分析...",
+    "suggestions": "改进建议...",
+    "injection": "要注入到对话中的指导文本..."
+}
 ```
 
-## 使用方法
+`injection` 字段的内容会被注入到宏变量或Author's Note中，直接影响下一轮AI生成。
 
-### 1. 配置API
-- 在插件设置面板填入 Claude API Key
-- 选择模型（推荐 Claude 3.5 Sonnet）
-- 点击「测试API连接」验证
+### 4. 输出注入方式
 
-### 2. 设置触发轮次
-- 默认每 **20轮** AI回复后自动触发
-- 可调整「轮次间隔」和「复盘上下文轮数」
+#### 方式A：宏变量（推荐）
+在角色卡的 **System Prompt** 或 **Main Prompt** 中插入：
+```
+[场外指导]
+{{rp_coach}}
+```
+每次复盘后，`{{rp_coach}}` 会自动更新为最新的 `injection` 内容。
 
-### 3. 选择输出方式
-- **世界书模式**：复盘内容自动写入指定世界书，常驻生效
-- **宏变量模式**：在提示词中使用 `{{claude_review}}` 引用
-- **两者都用**：同时生效（推荐）
+#### 方式B：Author's Note
+直接注入到SillyTavern内置的Author's Note中，通过深度(Depth)控制插入位置。
 
-### 4. 自定义提示词
-- 系统提示词：定义Claude的复盘角色和输出格式
-- 用户模板：支持变量替换：
-  - `{charName}` - 角色名
-  - `{userName}` - 用户名
-  - `{currentTurn}` - 当前轮次
-  - `{contextRounds}` - 上下文轮数
-  - `{chatHistory}` - 对话历史
+## 使用命令
 
-### 5. 手动触发
-- 点击「立即复盘」按钮
-- 或使用斜杠命令 `/claude-review` / `/cr`
+| 命令 | 说明 |
+|------|------|
+| `/rp_coach` | 立即手动执行复盘 |
+| `/rp_coach_status` | 查看当前轮次、上次触发、剩余轮次等状态 |
+| `/rp_coach_set 15` | 将自动触发轮次改为15轮 |
 
-## 斜杠命令
+## 使用场景示例
 
-| 命令 | 别名 | 功能 |
-|------|------|------|
-| `/claude-review` | `/cr` | 手动触发复盘 |
-| `/claude-review-status` | `/crs` | 查看当前状态 |
-| `/claude-review-reset` | `/crr` | 重置轮次计数器 |
+**场景**：使用Gemini进行RP，但角色经常过于激进、OOC或推进过快。
 
-## 工作原理
+**解决方案**：
+1. 安装本插件，API配置填入GPT-4o-mini或Claude Haiku
+2. 在角色卡System Prompt中加入 `{{rp_coach}}`
+3. 设置每15轮自动复盘
+4. 复盘提示词中要求："指出角色是否过于激进，给出缓和建议，injection中写一段让角色放慢节奏、注意情感铺垫的引导文本"
+5. 当达到15轮时，插件自动调用GPT-4分析对话，将指导文本注入 `{{rp_coach}}`
+6. 下一轮Gemini生成时，会读取到这段指导，自动调整行为
+
+## 文件结构
 
 ```
-[正常RP对话] → [AI回复计数+1] → [达到N轮?]
-                                    ↓
-                              [调用Claude API]
-                                    ↓
-                    [生成复盘指导内容]
-                                    ↓
-            ┌───────────────────────┼───────────────────────┐
-            ↓                       ↓                       ↓
-    [写入世界书]            [更新宏变量]            [插入系统消息]
-            ↓                       ↓                       ↓
-    [下次生成生效]          [提示词引用]          [聊天记录查看]
-```
-
-## 提示词模板示例
-
-### 系统提示词（默认）
-```
-你是一位专业的RP（角色扮演）场外指导。请基于提供的最近对话内容，
-分析角色扮演的表现，并给出指导建议。
-
-你的任务：
-1. 分析角色行为是否过于激进、OOC（脱离角色）或缺乏深度
-2. 指出对话中的亮点和不足
-3. 给出3-5条具体的改进建议
-4. 总结当前剧情走向和角色关系状态
-
-请以第三人称、专业但友善的语气撰写。
-```
-
-### 用户提示词模板（默认）
-```
-请复盘以下最近{contextRounds}轮对话：
-
-角色名称：{charName}
-用户名称：{userName}
-当前轮次：{currentTurn}
-
-对话内容：
-{chatHistory}
-
-请给出专业的复盘指导。
+rp-coach/
+├── manifest.json      # 扩展元数据（酒馆识别用）
+├── index.js           # 主逻辑代码
+├── settings.html      # 设置面板HTML模板
+└── style.css          # 样式文件
 ```
 
 ## 注意事项
 
-- ⚠️ **API Key安全**：请勿在公共环境分享包含API Key的配置
-- 🔄 **异步竞态**：复盘期间会自动暂停RP生成（可关闭）
-- 💾 **世界书依赖**：使用世界书模式时，请确保至少存在一本世界书
-- 📝 **Token消耗**：复盘会消耗Claude API的token，请注意用量
-
-## 兼容性
-
-- SillyTavern >= 1.12.0
-- 支持 Chat Completion 和 Text Completion API
+1. **API Key安全**：Key存储在酒馆的 `extensionSettings` 中（服务器端明文存储），建议使用本地模型或专用Key
+2. **Token消耗**：复盘会消耗外部API的token，建议用便宜模型（如GPT-4o-mini、Haiku）
+3. **对话长度**：复盘默认取最近40条消息，避免超长历史导致token爆炸
+4. **酒馆版本**：要求 SillyTavern >= 1.12.0
 
 ## License
 

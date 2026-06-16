@@ -1,88 +1,55 @@
-/**
- * Claude Review - AI场外复盘指导插件
- */
+const MODULE_NAME = 'rp_coach';
 
-import { renderExtensionTemplateAsync } from '../../../../script.js';
-
-const MODULE_NAME = 'claude_review';
-const REVIEW_ENTRY_UID = 999999001;
-
+// ==================== 默认设置 ====================
 const defaultSettings = Object.freeze({
     enabled: true,
-    apiBaseUrl: 'https://api.anthropic.com',
+    // API 配置
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
     apiKey: '',
-    model: 'claude-3-5-sonnet-20241022',
-    customModel: '',
-    maxTokens: 2048,
-    temperature: 0.7,
-    triggerInterval: 20,
-    contextRounds: 10,
-    autoTrigger: true,
-    manualTriggerOnly: false,
-    systemPrompt: `你是一位专业的RP（角色扮演）场外指导。请基于提供的最近对话内容，分析角色扮演的表现，并给出指导建议。
+    model: 'gpt-4o-mini',
+    // 触发配置
+    triggerRounds: 20,
+    triggerMode: 'auto',       // auto | manual
+    // 提示词
+    systemPrompt: `你是一位专业的RP（角色扮演）场外指导。请分析以下对话历史，然后：
+1. 指出当前角色扮演中存在的问题（如OOC、逻辑矛盾、节奏过快、角色崩坏等）
+2. 给出具体的改进建议
+3. 提供一段"指导注入文本"，这段文本将被用于在下一轮引导AI角色调整行为
 
-你的任务：
-1. 分析角色行为是否过于激进、OOC（脱离角色）或缺乏深度
-2. 指出对话中的亮点和不足
-3. 给出3-5条具体的改进建议
-4. 总结当前剧情走向和角色关系状态
-
-请以第三人称、专业但友善的语气撰写。输出格式：
-【行为分析】...
-【剧情评估】...
-【改进建议】...
-【关系状态】...`,
-    userPromptTemplate: `请复盘以下最近{contextRounds}轮对话：
-
-角色名称：{charName}
-用户名称：{userName}
-当前轮次：{currentTurn}
-
-对话内容：
-{chatHistory}
-
-请给出专业的复盘指导。`,
-    outputMode: 'both',
-    worldInfoBook: '',
-    worldInfoEntryName: 'Claude复盘指导',
-    worldInfoPosition: 0,
-    worldInfoOrder: 100,
-    worldInfoConstant: true,
-    macroName: 'claude_review',
-    showNotification: true,
-    injectAsSystemMessage: false,
-    reviewLockRP: true,
-    debugMode: false,
+请严格用以下JSON格式输出，不要输出其他内容：
+{
+    "analysis": "问题分析...",
+    "suggestions": "改进建议...",
+    "injection": "要注入的指导文本..."
+}`,
+    // 输出配置
+    outputMode: 'macro',      // macro | authorsnote
+    macroName: 'rp_coach',
+    authorsNotePosition: 1,   // Author's Note深度
+    // 状态
+    lastTriggerRound: 0,
+    totalRounds: 0,
+    isProcessing: false,
+    lastInjection: ''
 });
 
-let settings = {};
-let turnCounter = 0;
-let isReviewing = false;
-let lastReviewContent = '';
-let reviewHistory = [];
-let panelMounted = false;
+let settings = null;
+let messageListener = null;
 
-function log(...args) {
-    console.log(`[${MODULE_NAME}]`, ...args);
-}
-
-function debug(...args) {
-    if (settings.debugMode) {
-        console.debug(`[${MODULE_NAME}]`, ...args);
-    }
-}
-
+// ==================== 设置管理 ====================
 function getSettings() {
-    const context = SillyTavern.getContext();
-    if (!context.extensionSettings[MODULE_NAME]) {
-        context.extensionSettings[MODULE_NAME] = structuredClone(defaultSettings);
+    const { extensionSettings } = SillyTavern.getContext();
+    if (!extensionSettings[MODULE_NAME]) {
+        extensionSettings[MODULE_NAME] = structuredClone(defaultSettings);
     }
+    // 合并默认键（处理更新后新增的配置项）
     for (const key of Object.keys(defaultSettings)) {
-        if (!Object.hasOwn(context.extensionSettings[MODULE_NAME], key)) {
-            context.extensionSettings[MODULE_NAME][key] = defaultSettings[key];
+        if (!Object.hasOwn(extensionSettings[MODULE_NAME], key)) {
+            extensionSettings[MODULE_NAME][key] = defaultSettings[key];
         }
     }
-    return context.extensionSettings[MODULE_NAME];
+    settings = extensionSettings[MODULE_NAME];
+    return settings;
 }
 
 function saveSettings() {
@@ -90,301 +57,513 @@ function saveSettings() {
     saveSettingsDebounced();
 }
 
-function getRecentChatHistory(rounds) {
-    const context = SillyTavern.getContext();
-    const chat = context.chat || [];
-    const charName = context.characters[context.characterId]?.name || '角色';
-    const userName = context.name1 || '用户';
-    const messages = chat.filter(m => !m.is_system && !(m.extra?.type === 'system'));
-    const recentMessages = messages.slice(-rounds * 2);
+// ==================== 对话历史构建 ====================
+function buildChatHistoryForReview(maxMessages = 40) {
+    const { chat } = SillyTavern.getContext();
+    const recentMessages = chat.slice(-maxMessages);
+
     let history = '';
-    recentMessages.forEach((msg) => {
-        const name = msg.is_user ? userName : (msg.name || charName);
-        history += `[${name}]: ${msg.mes || ''}\n\n`;
-    });
-    return { history, charName, userName, currentTurn: messages.length };
+    for (const msg of recentMessages) {
+        const name = msg.name || (msg.is_user ? 'User' : 'AI');
+        const content = msg.mes || '';
+        history += `[${name}]: ${content}\n\n`;
+    }
+    return history.trim();
 }
 
-async function callClaudeAPI(systemPrompt, userPrompt) {
-    const model = settings.customModel || settings.model;
-    const apiKey = settings.apiKey?.trim();
-    if (!apiKey) throw new Error('API Key未设置');
-    const url = `${settings.apiBaseUrl.replace(/\/$/, '')}/v1/messages`;
-    const body = { model, max_tokens: settings.maxTokens, temperature: settings.temperature, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] };
-    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body) });
-    if (!response.ok) { const errorText = await response.text(); throw new Error(`API请求失败 (${response.status}): ${errorText}`); }
+// ==================== 外部API调用 ====================
+async function callExternalAPI(systemPrompt, userPrompt) {
+    const { apiUrl, apiKey, model } = settings;
+
+    if (!apiUrl) {
+        throw new Error('API URL未配置');
+    }
+    if (!apiKey) {
+        throw new Error('API Key未配置');
+    }
+
+    const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000,
+            response_format: { type: 'json_object' }
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`API请求失败 [${response.status}]: ${errorText || response.statusText}`);
+    }
+
     const data = await response.json();
-    return data.content?.[0]?.text || '';
-}
-
-async function getWorldInfoData() {
-    try { const response = await fetch('/api/worldinfo/get'); if (!response.ok) return null; return await response.json(); } catch (e) { return null; }
-}
-
-async function updateWorldInfoEntry(content) {
-    const targetBook = settings.worldInfoBook?.trim();
-    const worldInfoData = await getWorldInfoData();
-    if (!worldInfoData) throw new Error('无法获取世界书数据');
-    let targetBookName = targetBook;
-    if (!targetBookName) { const books = Object.keys(worldInfoData); if (books.length === 0) throw new Error('没有可用的世界书'); targetBookName = books[0]; }
-    const book = worldInfoData[targetBookName];
-    if (!book) throw new Error(`未找到世界书: ${targetBookName}`);
-    let entry = book.entries?.find(e => e.uid === REVIEW_ENTRY_UID);
-    if (!entry) {
-        entry = { uid: REVIEW_ENTRY_UID, comment: settings.worldInfoEntryName, key: ['复盘','review','指导'], keysecondary: [], content, position: settings.worldInfoPosition, order: settings.worldInfoOrder, constant: settings.worldInfoConstant, selective: false, selectiveLogic: 0, addMemo: true, displayIndex: 0, excludeRecursion: false, preventRecursion: false, delayUntilRecursion: false, probability: 100, useProbability: true, depth: settings.worldInfoPosition, group: '', scanDepth: null, caseSensitive: null, matchWholeWords: null, useGroupScoring: null, automationId: '', role: 0, sticky: 0, cooldown: 0, delay: 0 };
-        if (!book.entries) book.entries = []; book.entries.push(entry);
-    } else { entry.content = content; entry.comment = settings.worldInfoEntryName; entry.position = settings.worldInfoPosition; entry.order = settings.worldInfoOrder; entry.constant = settings.worldInfoConstant; entry.depth = settings.worldInfoPosition; }
-    const response = await fetch('/api/worldinfo/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: targetBookName, entries: book.entries }) });
-    if (!response.ok) throw new Error('保存世界书失败');
-    const { eventSource, event_types } = SillyTavern.getContext();
-    eventSource.emit(event_types.WORLDINFO_UPDATED);
-    return targetBookName;
-}
-
-function registerReviewMacro() {
-    try { const { macros } = SillyTavern.getContext(); if (macros?.register) { macros.register(settings.macroName, { description: 'Claude复盘指导内容', category: macros.category?.UTILITY || 'utility', handler: () => lastReviewContent || '（暂无复盘内容）' }); log('宏已注册:', `{{${settings.macroName}}}`); } } catch (e) { debug('注册宏失败:', e); }
-}
-function unregisterReviewMacro() { try { const { macros } = SillyTavern.getContext(); if (macros?.registry) macros.registry.unregisterMacro(settings.macroName); } catch (e) {} }
-
-async function performReview(force = false) {
-    if (isReviewing) { log('复盘进行中'); return; }
-    if (!settings.enabled) return;
-    if (!force && settings.manualTriggerOnly) return;
-    isReviewing = true;
-    const { loader, toastr } = SillyTavern.getContext();
-    let loaderHandle = null;
-    try {
-        if (settings.showNotification) loaderHandle = loader.show({ message: 'Claude正在进行场外复盘...', blocking: settings.reviewLockRP, toastMode: 'stoppable' });
-        const { history, charName, userName, currentTurn } = getRecentChatHistory(settings.contextRounds);
-        if (!history.trim()) { log('没有足够历史对话'); return; }
-        const userPrompt = settings.userPromptTemplate.replace(/{contextRounds}/g, settings.contextRounds).replace(/{charName}/g, charName).replace(/{userName}/g, userName).replace(/{currentTurn}/g, currentTurn).replace(/{chatHistory}/g, history);
-        const reviewContent = await callClaudeAPI(settings.systemPrompt, userPrompt);
-        if (!reviewContent.trim()) throw new Error('Claude返回空内容');
-        lastReviewContent = reviewContent;
-        reviewHistory.push({ turn: currentTurn, timestamp: Date.now(), content: reviewContent });
-        if (reviewHistory.length > 50) reviewHistory = reviewHistory.slice(-50);
-        if (settings.outputMode === 'world_info' || settings.outputMode === 'both') { try { const bookName = await updateWorldInfoEntry(reviewContent); log(`复盘已写入世界书: ${bookName}`); if (settings.showNotification) toastr.success(`复盘已更新至世界书「${bookName}」`); } catch (e) { log('世界书写入失败:', e); if (settings.showNotification) toastr.warning(`世界书写入失败: ${e.message}`); } }
-        if (settings.outputMode === 'macro' || settings.outputMode === 'both') { registerReviewMacro(); log(`复盘已更新至宏变量: {{${settings.macroName}}}`); }
-        if (settings.injectAsSystemMessage) { const context = SillyTavern.getContext(); context.chat.push({ is_user: false, is_system: true, name: 'Claude Review', mes: `📋 **场外复盘指导**（第${currentTurn}轮）\n\n${reviewContent}`, send_date: Date.now(), extra: { type: 'system', model: 'claude-review' } }); context.saveChat(); }
-        if (settings.showNotification && !settings.injectAsSystemMessage) toastr.success(`第${currentTurn}轮复盘完成`);
-        turnCounter = 0;
-    } catch (error) { log('复盘失败:', error); if (settings.showNotification) toastr.error(`复盘失败: ${error.message}`); } finally { isReviewing = false; if (loaderHandle) await loaderHandle.hide(); }
-}
-
-function onMessageReceived(data) {
-    if (!settings.enabled || settings.manualTriggerOnly) return;
-    if (isReviewing) return;
-    const context = SillyTavern.getContext();
-    const message = context.chat[data];
-    if (message && !message.is_user && !message.is_system) {
-        turnCounter++;
-        debug(`AI回复计数: ${turnCounter}/${settings.triggerInterval}`);
-        if (turnCounter >= settings.triggerInterval) { log(`达到触发轮次，开始复盘`); setTimeout(() => performReview(), 500); }
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('API返回格式异常');
     }
+    return data.choices[0].message.content;
 }
-function onChatChanged() { turnCounter = 0; lastReviewContent = ''; debug('聊天切换，计数器重置'); }
 
-// ==================== 关键修复：设置面板挂载 ====================
-// 第三方扩展必须自己把面板插入到 #extensions_settings2
-// 但 APP_READY 可能不触发，所以用多种方式尝试
-
-async function tryMountPanel() {
-    if (panelMounted) return true;
-
+// ==================== 结果解析 ====================
+function parseCoachResult(rawJson) {
     try {
-        const settingsHtml = await renderExtensionTemplateAsync(`third-party/${MODULE_NAME}`, 'settings', { MODULE_NAME });
-
-        // 方式1：标准容器
-        let $container = $('#extensions_settings2');
-        if ($container.length) {
-            $container.append(settingsHtml);
-            panelMounted = true;
-            log('面板已挂载到 #extensions_settings2');
-            return true;
-        }
-
-        // 方式2：移动端可能用的容器
-        $container = $('#extensions_settings');
-        if ($container.length) {
-            $container.append(settingsHtml);
-            panelMounted = true;
-            log('面板已挂载到 #extensions_settings');
-            return true;
-        }
-
-        // 方式3：class 选择器
-        $container = $('.extensions_settings').first();
-        if ($container.length) {
-            $container.append(settingsHtml);
-            panelMounted = true;
-            log('面板已挂载到 .extensions_settings');
-            return true;
-        }
-
-        // 方式4：任何包含 extensions_settings 的 id
-        $container = $('[id*="extensions_settings"]').first();
-        if ($container.length) {
-            $container.append(settingsHtml);
-            panelMounted = true;
-            log('面板已挂载到模糊匹配容器');
-            return true;
-        }
-
-        return false;
+        const result = JSON.parse(rawJson);
+        return {
+            analysis: result.analysis || '无分析内容',
+            suggestions: result.suggestions || '无建议内容',
+            injection: result.injection || ''
+        };
     } catch (e) {
-        log('面板挂载失败:', e);
-        return false;
+        console.warn(`[${MODULE_NAME}] JSON解析失败，尝试提取文本:`, e);
+        // Fallback：直接返回原始文本作为injection
+        return {
+            analysis: '解析失败（模型未按JSON格式输出）',
+            suggestions: rawJson.substring(0, 500),
+            injection: rawJson
+        };
     }
 }
 
-function initCollapsiblePanels() {
-    $(document).off('click.cr-drawer').on('click.cr-drawer', '.claude-review-settings .inline-drawer-toggle', function() {
-        const $content = $(this).next('.inline-drawer-content');
-        const $icon = $(this).find('.inline-drawer-icon');
-        if ($content.is(':visible')) { $content.slideUp(200); $icon.removeClass('down').addClass('up'); }
-        else { $content.slideDown(200); $icon.removeClass('up').addClass('down'); }
+// ==================== 注入方式 ====================
+function injectToMacro(injectionText) {
+    const { macros } = SillyTavern.getContext();
+
+    // 注销旧宏（忽略错误）
+    try {
+        macros.registry.unregisterMacro(settings.macroName);
+    } catch (e) { /* ignore */ }
+
+    // 注册新宏（handler必须是同步函数）
+    macros.register(settings.macroName, {
+        description: 'RP Coach场外指导注入内容',
+        handler: () => injectionText
     });
-    $('.claude-review-settings .inline-drawer-content').show();
-    $('.claude-review-settings .inline-drawer-icon').addClass('down');
+
+    settings.lastInjection = injectionText;
+    console.log(`[${MODULE_NAME}] 宏 {{${settings.macroName}}} 已更新 (${injectionText.length}字符)`);
 }
 
-function bindSettingsUI() {
-    const ns = `#${MODULE_NAME}`;
-    $(`${ns}_enabled`).on('change', function() { settings.enabled = $(this).prop('checked'); updateStatusBadge(); saveSettings(); });
-    $(`${ns}_api_key`).on('input', function() { settings.apiKey = $(this).val(); saveSettings(); });
-    $(`${ns}_api_base`).on('input', function() { settings.apiBaseUrl = $(this).val(); saveSettings(); });
-    $(`${ns}_model`).on('change', function() { settings.model = $(this).val(); saveSettings(); });
-    $(`${ns}_custom_model`).on('input', function() { settings.customModel = $(this).val(); saveSettings(); });
-    $(`${ns}_max_tokens`).on('input', function() { settings.maxTokens = parseInt($(this).val()) || 2048; saveSettings(); });
-    $(`${ns}_temperature`).on('input', function() { settings.temperature = parseFloat($(this).val()) || 0.7; saveSettings(); });
-    $(`${ns}_interval`).on('input', function() { settings.triggerInterval = parseInt($(this).val()) || 20; saveSettings(); });
-    $(`${ns}_context_rounds`).on('input', function() { settings.contextRounds = parseInt($(this).val()) || 10; saveSettings(); });
-    $(`${ns}_auto_trigger`).on('change', function() { settings.autoTrigger = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_manual_only`).on('change', function() { settings.manualTriggerOnly = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_system_prompt`).on('input', function() { settings.systemPrompt = $(this).val(); saveSettings(); });
-    $(`${ns}_user_prompt`).on('input', function() { settings.userPromptTemplate = $(this).val(); saveSettings(); });
-    $(`${ns}_output_mode`).on('change', function() { settings.outputMode = $(this).val(); updateOutputUI(); saveSettings(); });
-    $(`${ns}_wi_book`).on('input', function() { settings.worldInfoBook = $(this).val(); saveSettings(); });
-    $(`${ns}_wi_entry_name`).on('input', function() { settings.worldInfoEntryName = $(this).val(); saveSettings(); });
-    $(`${ns}_wi_position`).on('input', function() { settings.worldInfoPosition = parseInt($(this).val()) || 0; saveSettings(); });
-    $(`${ns}_macro_name`).on('input', function() { unregisterReviewMacro(); settings.macroName = $(this).val() || 'claude_review'; registerReviewMacro(); saveSettings(); });
-    $(`${ns}_show_notif`).on('change', function() { settings.showNotification = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_inject_system`).on('change', function() { settings.injectAsSystemMessage = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_lock_rp`).on('change', function() { settings.reviewLockRP = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_debug`).on('change', function() { settings.debugMode = $(this).prop('checked'); saveSettings(); });
-    $(`${ns}_manual_review`).on('click', async function() { const $btn = $(this); $btn.prop('disabled', true).text('复盘中...'); await performReview(true); $btn.prop('disabled', false).text('立即复盘'); });
-    $(`${ns}_test_api`).on('click', async function() { const $btn = $(this); $btn.prop('disabled', true).text('测试中...'); try { const result = await callClaudeAPI('你是一个测试助手，请回复"API连接成功"。', '测试连接'); toastr.success(`API测试成功: ${result.substring(0,50)}...`); } catch (e) { toastr.error(`API测试失败: ${e.message}`); } $btn.prop('disabled', false).text('测试API连接'); });
-    $(`${ns}_reset_counter`).on('click', function() { turnCounter = 0; toastr.info('计数器已重置'); });
-    $(`${ns}_view_last`).on('click', function() { if (!lastReviewContent) { toastr.warning('暂无复盘内容'); return; } const { Popup, POPUP_TYPE } = SillyTavern.getContext(); Popup.show(POPUP_TYPE.DISPLAY, lastReviewContent, { title: '上次复盘内容', wide: true, large: true }); });
+function injectToAuthorsNote(injectionText) {
+    const { extensionSettings } = SillyTavern.getContext();
+
+    // 使用内置的Author's Note扩展配置
+    const anKey = 'authors_note';
+    if (!extensionSettings[anKey]) {
+        extensionSettings[anKey] = {};
+    }
+
+    const anSettings = extensionSettings[anKey];
+    anSettings.note = injectionText;
+    anSettings.depth = settings.authorsNotePosition;
+    anSettings.frequency = 1; // 每轮都插入
+
+    // 确保Author's Note扩展启用（如果UI有开关的话）
+    if (typeof anSettings.enabled !== 'undefined') {
+        anSettings.enabled = true;
+    }
+
+    settings.lastInjection = injectionText;
+    saveSettings();
+
+    console.log(`[${MODULE_NAME}] Author's Note已更新 (深度:${settings.authorsNotePosition})`);
+}
+
+// ==================== 核心复盘逻辑 ====================
+export async function performReview() {
+    const { chat } = SillyTavern.getContext();
+
+    if (settings.isProcessing) {
+        toastr.warning('RP Coach正在处理中，请稍候...');
+        return;
+    }
+
+    if (chat.length < 4) {
+        toastr.info('对话历史太短（少于4条），暂不需要复盘');
+        return;
+    }
+
+    settings.isProcessing = true;
+    saveSettings();
+
+    const { loader } = SillyTavern.getContext();
+    const loadHandle = loader.show({
+        message: 'RP Coach正在场外复盘...',
+        blocking: true,
+        toastMode: 'stoppable'
+    });
+
+    try {
+        // 1. 构建对话历史
+        const chatHistory = buildChatHistoryForReview();
+
+        // 2. 构建用户提示词
+        const userPrompt = `请分析以下最近的角色扮演对话历史，给出指导建议：\n\n${chatHistory}`;
+
+        // 3. 调用外部API
+        const rawResult = await callExternalAPI(settings.systemPrompt, userPrompt);
+
+        // 4. 解析结果
+        const result = parseCoachResult(rawResult);
+
+        // 5. 根据配置注入
+        if (settings.outputMode === 'macro') {
+            injectToMacro(result.injection);
+            toastr.success(`场外指导已注入宏 {{${settings.macroName}}}`);
+        } else if (settings.outputMode === 'authorsnote') {
+            injectToAuthorsNote(result.injection);
+            toastr.success('场外指导已注入Author\'s Note');
+        }
+
+        // 6. 记录状态
+        settings.lastTriggerRound = chat.length;
+        settings.totalRounds++;
+        saveSettings();
+
+        // 7. 显示详细结果（在控制台）
+        console.log(`[${MODULE_NAME}] ====== 复盘结果 #${settings.totalRounds} ======`);
+        console.log(`[${MODULE_NAME}] 分析:`, result.analysis);
+        console.log(`[${MODULE_NAME}] 建议:`, result.suggestions);
+        console.log(`[${MODULE_NAME}] 注入:`, result.injection.substring(0, 200) + '...');
+
+        // 8. 弹出简要分析
+        toastr.info(`分析: ${result.analysis.substring(0, 80)}${result.analysis.length > 80 ? '...' : ''}`, 'RP Coach复盘完成');
+
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] 复盘失败:`, error);
+        toastr.error(`复盘失败: ${error.message}`, 'RP Coach错误');
+    } finally {
+        settings.isProcessing = false;
+        saveSettings();
+        await loadHandle.hide();
+    }
+}
+
+// ==================== 自动触发监听 ====================
+function onMessageReceived(data) {
+    if (!settings || !settings.enabled) return;
+    if (settings.triggerMode !== 'auto') return;
+    if (settings.isProcessing) return;
+
+    const { chat } = SillyTavern.getContext();
+    const currentRound = chat.length;
+    const roundsSinceLastTrigger = currentRound - settings.lastTriggerRound;
+
+    if (roundsSinceLastTrigger >= settings.triggerRounds) {
+        console.log(`[${MODULE_NAME}] 达到触发阈值 (${settings.triggerRounds}轮)，当前${currentRound}轮，开始复盘`);
+        performReview();
+    }
+}
+
+// ==================== 斜杠命令 ====================
+function registerSlashCommands() {
+    const { SlashCommandParser, SlashCommand, SlashCommandNamedArgument, SlashCommandArgument, ARGUMENT_TYPE } = SillyTavern.getContext();
+
+    // /rp_coach - 手动触发
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'rp_coach',
+        callback: async () => {
+            await performReview();
+            return 'RP Coach复盘完成';
+        },
+        returns: '复盘状态文本',
+        helpString: '手动触发RP Coach场外复盘',
+    }));
+
+    // /rp_coach_status - 查看状态
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'rp_coach_status',
+        callback: () => {
+            const { chat } = SillyTavern.getContext();
+            const current = chat.length;
+            const nextTrigger = settings.lastTriggerRound + settings.triggerRounds;
+            const remain = Math.max(0, nextTrigger - current);
+            return `当前${current}轮 | 上次${settings.lastTriggerRound}轮 | 距下次${remain}轮 | 总复盘${settings.totalRounds}次`;
+        },
+        returns: '状态文本',
+        helpString: '查看RP Coach当前状态',
+    }));
+
+    // /rp_coach_set - 设置触发轮次
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'rp_coach_set',
+        callback: (namedArgs, unnamedArgs) => {
+            const val = parseInt(unnamedArgs.toString());
+            if (isNaN(val) || val < 1) {
+                return '错误：请提供有效的正整数轮次，如 /rp_coach_set 20';
+            }
+            settings.triggerRounds = val;
+            saveSettings();
+            // 同步更新UI
+            const input = document.getElementById('rp_coach_trigger_rounds');
+            if (input) input.value = val;
+            return `触发轮次已设置为 ${val} 轮`;
+        },
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: '触发轮次数（正整数）',
+                typeList: ARGUMENT_TYPE.NUMBER,
+                isRequired: true,
+            }),
+        ],
+        helpString: '设置自动触发复盘轮次，例如 /rp_coach_set 20',
+    }));
+}
+
+// ==================== UI构建 ====================
+async function buildSettingsUI() {
+    const { renderExtensionTemplateAsync } = SillyTavern.getContext();
+
+    try {
+        const html = await renderExtensionTemplateAsync(`third-party/${MODULE_NAME}`, 'settings', {});
+        $('#extensions_settings2').append(html);
+        bindSettingsEvents();
+        loadSettingsToUI();
+        console.log(`[${MODULE_NAME}] 设置面板已加载`);
+    } catch (e) {
+        console.error(`[${MODULE_NAME}] 加载设置面板失败:`, e);
+        toastr.error('RP Coach设置面板加载失败');
+    }
+}
+
+function bindSettingsEvents() {
+    // 启用开关
+    $('#rp_coach_enabled').off('change').on('change', function() {
+        settings.enabled = $(this).prop('checked');
+        saveSettings();
+        toastr.info(settings.enabled ? 'RP Coach已启用' : 'RP Coach已禁用');
+    });
+
+    // API URL
+    $('#rp_coach_api_url').off('input').on('input', function() {
+        settings.apiUrl = $(this).val().trim();
+        saveSettings();
+    });
+
+    // API Key
+    $('#rp_coach_api_key').off('input').on('input', function() {
+        settings.apiKey = $(this).val().trim();
+        saveSettings();
+    });
+
+    // 模型
+    $('#rp_coach_model').off('input').on('input', function() {
+        settings.model = $(this).val().trim();
+        saveSettings();
+    });
+
+    // 触发轮次
+    $('#rp_coach_trigger_rounds').off('input').on('input', function() {
+        const val = parseInt($(this).val());
+        if (!isNaN(val) && val >= 1) {
+            settings.triggerRounds = val;
+            saveSettings();
+        }
+    });
+
+    // 触发模式
+    $('#rp_coach_trigger_mode').off('change').on('change', function() {
+        settings.triggerMode = $(this).val();
+        saveSettings();
+    });
+
+    // 系统提示词
+    $('#rp_coach_system_prompt').off('input').on('input', function() {
+        settings.systemPrompt = $(this).val();
+        saveSettings();
+    });
+
+    // 输出模式
+    $('#rp_coach_output_mode').off('change').on('change', function() {
+        settings.outputMode = $(this).val();
+        updateOutputModeUI();
+        saveSettings();
+    });
+
+    // 宏名称
+    $('#rp_coach_macro_name').off('input').on('input', function() {
+        settings.macroName = $(this).val().trim() || 'rp_coach';
+        saveSettings();
+    });
+
+    // Author's Note深度
+    $('#rp_coach_an_depth').off('input').on('input', function() {
+        const val = parseInt($(this).val());
+        if (!isNaN(val) && val >= 0) {
+            settings.authorsNotePosition = val;
+            saveSettings();
+        }
+    });
+
+    // 手动触发按钮
+    $('#rp_coach_trigger_btn').off('click').on('click', async function() {
+        await performReview();
+    });
+
+    // 测试连接按钮
+    $('#rp_coach_test_api').off('click').on('click', async function() {
+        await testApiConnection();
+    });
+
+    // 重置统计按钮
+    $('#rp_coach_reset_stats').off('click').on('click', function() {
+        settings.lastTriggerRound = 0;
+        settings.totalRounds = 0;
+        saveSettings();
+        updateStatsDisplay();
+        toastr.success('统计已重置');
+    });
 }
 
 function loadSettingsToUI() {
-    const ns = `#${MODULE_NAME}`;
-    $(`${ns}_enabled`).prop('checked', settings.enabled);
-    $(`${ns}_api_key`).val(settings.apiKey || '');
-    $(`${ns}_api_base`).val(settings.apiBaseUrl);
-    $(`${ns}_model`).val(settings.model);
-    $(`${ns}_custom_model`).val(settings.customModel || '');
-    $(`${ns}_max_tokens`).val(settings.maxTokens);
-    $(`${ns}_temperature`).val(settings.temperature);
-    $(`${ns}_interval`).val(settings.triggerInterval);
-    $(`${ns}_context_rounds`).val(settings.contextRounds);
-    $(`${ns}_auto_trigger`).prop('checked', settings.autoTrigger);
-    $(`${ns}_manual_only`).prop('checked', settings.manualTriggerOnly);
-    $(`${ns}_system_prompt`).val(settings.systemPrompt);
-    $(`${ns}_user_prompt`).val(settings.userPromptTemplate);
-    $(`${ns}_output_mode`).val(settings.outputMode);
-    $(`${ns}_wi_book`).val(settings.worldInfoBook || '');
-    $(`${ns}_wi_entry_name`).val(settings.worldInfoEntryName);
-    $(`${ns}_wi_position`).val(settings.worldInfoPosition);
-    $(`${ns}_macro_name`).val(settings.macroName);
-    $(`${ns}_show_notif`).prop('checked', settings.showNotification);
-    $(`${ns}_inject_system`).prop('checked', settings.injectAsSystemMessage);
-    $(`${ns}_lock_rp`).prop('checked', settings.reviewLockRP);
-    $(`${ns}_debug`).prop('checked', settings.debugMode);
-    updateOutputUI();
-    updateStatusBadge();
+    $('#rp_coach_enabled').prop('checked', settings.enabled);
+    $('#rp_coach_api_url').val(settings.apiUrl);
+    $('#rp_coach_api_key').val(settings.apiKey);
+    $('#rp_coach_model').val(settings.model);
+    $('#rp_coach_trigger_rounds').val(settings.triggerRounds);
+    $('#rp_coach_trigger_mode').val(settings.triggerMode);
+    $('#rp_coach_system_prompt').val(settings.systemPrompt);
+    $('#rp_coach_output_mode').val(settings.outputMode);
+    $('#rp_coach_macro_name').val(settings.macroName);
+    $('#rp_coach_an_depth').val(settings.authorsNotePosition);
+    updateOutputModeUI();
+    updateStatsDisplay();
 }
 
-function updateOutputUI() {
-    const mode = $(`#${MODULE_NAME}_output_mode`).val();
-    $(`.${MODULE_NAME}_wi_settings`).toggle(mode === 'world_info' || mode === 'both');
-    $(`.${MODULE_NAME}_macro_settings`).toggle(mode === 'macro' || mode === 'both');
+function updateOutputModeUI() {
+    const mode = settings.outputMode;
+    $('.rp_coach_output_config').hide();
+    if (mode === 'macro') $('#rp_coach_macro_config').show();
+    if (mode === 'authorsnote') $('#rp_coach_an_config').show();
 }
 
-function updateStatusBadge() {
-    const $badge = $(`#${MODULE_NAME}_status`);
-    if (!$badge.length) return;
-    if (settings.enabled) $badge.text('运行中').removeClass('inactive').addClass('active');
-    else $badge.text('已停用').removeClass('active').addClass('inactive');
+function updateStatsDisplay() {
+    const { chat } = SillyTavern.getContext();
+    const current = chat?.length || 0;
+    const remain = Math.max(0, settings.lastTriggerRound + settings.triggerRounds - current);
+
+    $('#rp_coach_stat_current').text(current);
+    $('#rp_coach_stat_last').text(settings.lastTriggerRound);
+    $('#rp_coach_stat_next').text(remain);
+    $('#rp_coach_stat_total').text(settings.totalRounds);
 }
 
-function registerSlashCommands() {
+// ==================== API测试 ====================
+async function testApiConnection() {
+    const { apiUrl, apiKey } = settings;
+    if (!apiUrl || !apiKey) {
+        toastr.warning('请先填写API URL和API Key');
+        return;
+    }
+
+    const { loader } = SillyTavern.getContext();
+    const handle = loader.show({ message: '测试API连接...', blocking: true });
+
     try {
-        const { SlashCommandParser, SlashCommand } = SillyTavern.getContext();
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'claude-review', callback: async () => { await performReview(true); return '复盘完成'; }, aliases: ['cr'], returns: '复盘状态', helpString: '手动触发Claude场外复盘。用法: /claude-review 或 /cr' }));
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'claude-review-status', callback: () => { const context = SillyTavern.getContext(); const chatLen = context.chat?.filter(m => !m.is_user && !m.is_system).length || 0; return `计数: ${turnCounter}/${settings.triggerInterval} | AI消息: ${chatLen} | ${isReviewing ? '复盘中' : '待机'}`; }, aliases: ['crs'], returns: '复盘状态', helpString: '查看当前复盘状态' }));
-        SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'claude-review-reset', callback: () => { turnCounter = 0; return '计数器已重置'; }, aliases: ['crr'], returns: '操作结果', helpString: '重置复盘轮次计数器' }));
-    } catch (e) { log('斜杠命令注册失败:', e); }
-}
+        // 尝试调用models列表或发一个简单请求
+        const testUrl = apiUrl.replace(/\/chat\/completions$/, '/models');
+        const response = await fetch(testUrl, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
 
-// ==================== 初始化逻辑（核心修复） ====================
-// 第三方扩展必须自己初始化，且 APP_READY 可能不触发
-// 使用轮询检测 DOM 容器是否就绪
-
-async function initializeExtension() {
-    if (panelMounted) return;
-
-    log('开始初始化...');
-    settings = getSettings();
-
-    // 尝试挂载面板
-    let mounted = await tryMountPanel();
-
-    if (mounted) {
-        bindSettingsUI();
-        loadSettingsToUI();
-        initCollapsiblePanels();
-
-        // 绑定事件
-        const { eventSource, event_types } = SillyTavern.getContext();
-        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
-        eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-
-        if (settings.outputMode === 'macro' || settings.outputMode === 'both') {
-            registerReviewMacro();
+        if (response.ok) {
+            toastr.success('API连接成功！');
+        } else {
+            // 如果models端点不可用，尝试发一个最小请求
+            const testResponse = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: settings.model,
+                    messages: [{ role: 'user', content: 'hi' }],
+                    max_tokens: 5
+                })
+            });
+            if (testResponse.ok) {
+                toastr.success('API连接成功（通过chat completions测试）！');
+            } else {
+                const err = await testResponse.text().catch(() => '');
+                toastr.error(`连接失败 [${testResponse.status}]: ${err || testResponse.statusText}`);
+            }
         }
-
-        registerSlashCommands();
-        log('初始化完成');
-    } else {
-        log('面板挂载失败，2秒后重试...');
-        setTimeout(initializeExtension, 2000);
+    } catch (error) {
+        toastr.error(`连接错误: ${error.message}`);
+    } finally {
+        await handle.hide();
     }
 }
 
-// 入口：立即执行，不等待任何事件
-jQuery(() => {
-    log('jQuery ready，开始初始化');
-    initializeExtension();
-});
+// ==================== 生命周期钩子 ====================
+export function onActivate() {
+    console.log(`[${MODULE_NAME}] RP Coach 扩展激活中...`);
 
-// 备用：如果 jQuery ready 时 DOM 还没准备好，监听 APP_READY
-const { eventSource, event_types } = SillyTavern.getContext();
-eventSource.on(event_types.APP_READY, () => {
-    if (!panelMounted) {
-        log('APP_READY 触发，重新尝试初始化');
-        initializeExtension();
+    // 同步初始化设置
+    getSettings();
+
+    // 注册斜杠命令
+    registerSlashCommands();
+
+    // 注册宏（初始状态）
+    const { macros } = SillyTavern.getContext();
+    try {
+        macros.register(settings.macroName, {
+            description: 'RP Coach场外指导（等待首次复盘）',
+            handler: () => settings.lastInjection || '（暂无场外指导，请等待复盘或手动触发 /rp_coach）'
+        });
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 初始宏注册失败（可能已存在）:`, e);
     }
-});
 
-// 生命周期钩子（供酒馆调用，但第三方可能不触发）
-export async function onInstall() { log('首次安装'); }
-export async function onUpdate() { log('插件更新'); }
-export async function onDelete() { log('插件删除'); unregisterReviewMacro(); }
-export function onEnable() { log('插件已启用'); }
-export function onDisable() { log('插件已禁用'); unregisterReviewMacro(); }
-export async function onActivate() {
-    log('activate 钩子触发');
-    if (!panelMounted) initializeExtension();
+    // 异步加载UI（等待APP_READY）
+    const { eventSource, event_types } = SillyTavern.getContext();
+
+    const initUI = async () => {
+        await buildSettingsUI();
+
+        // 绑定消息监听
+        messageListener = onMessageReceived;
+        eventSource.on(event_types.MESSAGE_RECEIVED, messageListener);
+
+        // 定期更新统计显示
+        setInterval(updateStatsDisplay, 3000);
+
+        console.log(`[${MODULE_NAME}] RP Coach 初始化完成 | 模式:${settings.outputMode} | 触发:${settings.triggerRounds}轮`);
+        toastr.success('RP Coach 场外复盘插件已加载', '扩展就绪');
+    };
+
+    if (document.readyState === 'complete') {
+        initUI();
+    } else {
+        eventSource.on(event_types.APP_READY, initUI);
+    }
+}
+
+export function onDisable() {
+    console.log(`[${MODULE_NAME}] RP Coach 扩展禁用中...`);
+
+    const { eventSource, event_types, macros } = SillyTavern.getContext();
+
+    // 移除消息监听
+    if (messageListener) {
+        eventSource.removeListener(event_types.MESSAGE_RECEIVED, messageListener);
+        messageListener = null;
+    }
+
+    // 注销宏
+    try {
+        macros.registry.unregisterMacro(settings.macroName);
+    } catch (e) { /* ignore */ }
+
+    toastr.info('RP Coach 已禁用');
 }

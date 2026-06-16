@@ -1,253 +1,108 @@
-/* Claude Review 插件样式 - 兼容PC和移动端 */
+/* RP Coach 扩展样式 */
+.rp-coach-settings {
+    padding: 5px;
+}
 
-.claude-review-settings {
-    padding: 10px 0;
+.rp_coach_block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.rp_coach_block label {
+    font-weight: bold;
+    margin-top: 6px;
+    color: #e0e0e0;
+}
+
+.rp_coach_block input,
+.rp_coach_block select,
+.rp_coach_block textarea {
     width: 100%;
     box-sizing: border-box;
 }
 
-.claude-review-settings .inline-drawer-toggle {
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 14px;
-    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
-    border-radius: 8px;
-    margin-bottom: 4px;
-    font-size: 15px;
-    min-height: 44px;
-    touch-action: manipulation;
+.rp_coach_block small {
+    color: #888;
+    font-size: 0.8em;
+    line-height: 1.4;
 }
 
-.claude-review-settings .inline-drawer-toggle:hover,
-.claude-review-settings .inline-drawer-toggle:active {
-    background: var(--SmartThemeEmColor, rgba(255, 255, 255, 0.1));
+.rp_coach_block small code {
+    background: rgba(255,255,255,0.1);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #aad;
 }
 
-.claude-review-settings .inline-drawer-content {
-    padding: 12px 14px;
-    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
-    border-radius: 0 0 8px 8px;
-    margin-bottom: 12px;
-}
-
-.claude-review-settings .inline-drawer-icon {
-    transition: transform 0.3s ease;
-    font-size: 16px;
-    min-width: 20px;
-    text-align: center;
-}
-
-.claude-review-settings .inline-drawer-icon.down {
-    transform: rotate(0deg);
-}
-
-.claude-review-settings .inline-drawer-icon.up {
-    transform: rotate(180deg);
-}
-
-.claude-review-settings .cr-section {
-    margin-bottom: 18px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
-}
-
-.claude-review-settings .cr-section:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-}
-
-.claude-review-settings .cr-section-title {
-    font-weight: bold;
-    font-size: 15px;
-    color: var(--SmartThemeBodyColor, #fff);
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.claude-review-settings .cr-section-title i {
-    color: var(--SmartThemeEmColor, #d4a373);
-    font-size: 16px;
-}
-
-.claude-review-settings .cr-form-row {
-    display: flex;
-    align-items: center;
-    margin-bottom: 12px;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.claude-review-settings .cr-form-row label {
-    min-width: 100px;
-    font-size: 14px;
-    color: var(--SmartThemeBodyColor, #ccc);
-    flex-shrink: 0;
-}
-
-.claude-review-settings .cr-form-row input[type="text"],
-.claude-review-settings .cr-form-row input[type="number"],
-.claude-review-settings .cr-form-row input[type="password"],
-.claude-review-settings .cr-form-row select,
-.claude-review-settings .cr-form-row textarea {
-    flex: 1;
-    min-width: 0;
-    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+.rp_coach_output_config {
+    background: rgba(0,0,0,0.2);
+    padding: 10px;
     border-radius: 6px;
-    padding: 8px 12px;
-    color: var(--SmartThemeBodyColor, #fff);
-    font-size: 14px;
-    outline: none;
-    min-height: 36px;
+    margin-top: 6px;
+    border: 1px solid rgba(255,255,255,0.05);
 }
 
-.claude-review-settings .cr-form-row input:focus,
-.claude-review-settings .cr-form-row select:focus,
-.claude-review-settings .cr-form-row textarea:focus {
-    border-color: var(--SmartThemeEmColor, #d4a373);
-}
-
-.claude-review-settings .cr-form-row input[type="checkbox"] {
-    width: 22px;
-    height: 22px;
-    accent-color: var(--SmartThemeEmColor, #d4a373);
-    flex-shrink: 0;
-}
-
-.claude-review-settings .cr-form-row textarea {
-    min-height: 120px;
-    resize: vertical;
-    font-family: monospace;
-    line-height: 1.5;
-    width: 100%;
-}
-
-.claude-review-settings .cr-form-row .cr-hint {
-    font-size: 12px;
-    color: var(--SmartThemeBlurTintColor, #888);
-    margin-top: 4px;
-    flex-basis: 100%;
-    margin-left: 110px;
-}
-
-@media (max-width: 600px) {
-    .claude-review-settings .cr-form-row {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 6px;
-    }
-
-    .claude-review-settings .cr-form-row label {
-        min-width: auto;
-        font-size: 13px;
-    }
-
-    .claude-review-settings .cr-form-row input,
-    .claude-review-settings .cr-form-row select,
-    .claude-review-settings .cr-form-row textarea {
-        width: 100%;
-        font-size: 16px;
-    }
-
-    .claude-review-settings .cr-form-row .cr-hint {
-        margin-left: 0;
-    }
-
-    .claude-review-settings .cr-btn-group {
-        flex-direction: column;
-    }
-
-    .claude-review-settings .cr-btn {
-        width: 100%;
-        justify-content: center;
-        min-height: 44px;
-    }
-}
-
-.claude-review-settings .cr-btn-group {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 12px;
-}
-
-.claude-review-settings .cr-btn {
-    padding: 8px 16px;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
-    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
-    color: var(--SmartThemeBodyColor, #fff);
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: all 0.2s ease;
-    display: inline-flex;
-    align-items: center;
+.rp_coach_stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 6px;
-    min-height: 36px;
-    touch-action: manipulation;
+    background: rgba(0,0,0,0.15);
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 8px;
 }
 
-.claude-review-settings .cr-btn:hover,
-.claude-review-settings .cr-btn:active {
-    background: var(--SmartThemeEmColor, rgba(212, 163, 115, 0.2));
-    border-color: var(--SmartThemeEmColor, #d4a373);
+.rp_coach_stats span {
+    font-size: 0.9em;
+    color: #ccc;
 }
 
-.claude-review-settings .cr-btn.primary {
-    background: var(--SmartThemeEmColor, #d4a373);
-    color: #000;
-    border-color: var(--SmartThemeEmColor, #d4a373);
+.rp_coach_stats b {
+    color: #fff;
+}
+
+#rp_coach_trigger_btn {
+    background: linear-gradient(135deg, #2d8a5e, #1e6b47);
+    color: white;
     font-weight: bold;
+    border: none;
+    padding: 8px 16px;
+    transition: opacity 0.2s;
 }
 
-.claude-review-settings .cr-btn.primary:hover,
-.claude-review-settings .cr-btn.primary:active {
-    background: #e8b88a;
+#rp_coach_trigger_btn:hover {
+    opacity: 0.9;
 }
 
-.claude-review-settings .cr-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+#rp_coach_test_api {
+    background: linear-gradient(135deg, #3a6ea5, #2a5080);
+    color: white;
+    border: none;
+    margin-top: 4px;
+    align-self: flex-start;
 }
 
-.claude-review-settings .cr-status-badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: bold;
-    margin-left: auto;
+#rp_coach_reset_stats {
+    background: rgba(255,255,255,0.1);
+    color: #ccc;
+    border: 1px solid rgba(255,255,255,0.1);
+    align-self: flex-start;
 }
 
-.claude-review-settings .cr-status-badge.active {
-    background: rgba(76, 175, 80, 0.2);
-    color: #4caf50;
-    border: 1px solid rgba(76, 175, 80, 0.4);
+.rp_coach_primary_btn {
+    margin-top: 4px;
 }
 
-.claude-review-settings .cr-status-badge.inactive {
-    background: rgba(244, 67, 54, 0.2);
-    color: #f44336;
-    border: 1px solid rgba(244, 67, 54, 0.4);
+/* 复选框样式微调 */
+.rp_coach_block .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
 }
 
-.claude-review-settings .cr-variable-tag {
-    display: inline-block;
-    background: rgba(100, 100, 255, 0.15);
-    color: #aab8ff;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: monospace;
-    margin: 0 2px;
-}
-
-.claude-review-settings .cr-divider {
-    height: 1px;
-    background: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
-    margin: 14px 0;
+.rp_coach_block .checkbox_label input[type="checkbox"] {
+    width: auto;
 }
