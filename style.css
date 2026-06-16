@@ -1,7 +1,9 @@
-/* Claude Review 插件样式 */
+/* Claude Review 插件样式 - 兼容PC和移动端 */
 
 .claude-review-settings {
     padding: 10px 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .claude-review-settings .inline-drawer-toggle {
@@ -9,25 +11,32 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 10px 14px;
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
-    border-radius: 6px;
+    border-radius: 8px;
     margin-bottom: 4px;
+    font-size: 15px;
+    min-height: 44px;
+    touch-action: manipulation;
 }
 
-.claude-review-settings .inline-drawer-toggle:hover {
+.claude-review-settings .inline-drawer-toggle:hover,
+.claude-review-settings .inline-drawer-toggle:active {
     background: var(--SmartThemeEmColor, rgba(255, 255, 255, 0.1));
 }
 
 .claude-review-settings .inline-drawer-content {
-    padding: 10px 12px;
+    padding: 12px 14px;
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
-    border-radius: 0 0 6px 6px;
-    margin-bottom: 10px;
+    border-radius: 0 0 8px 8px;
+    margin-bottom: 12px;
 }
 
 .claude-review-settings .inline-drawer-icon {
     transition: transform 0.3s ease;
+    font-size: 16px;
+    min-width: 20px;
+    text-align: center;
 }
 
 .claude-review-settings .inline-drawer-icon.down {
@@ -39,8 +48,8 @@
 }
 
 .claude-review-settings .cr-section {
-    margin-bottom: 16px;
-    padding-bottom: 12px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
 }
 
@@ -51,28 +60,30 @@
 
 .claude-review-settings .cr-section-title {
     font-weight: bold;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--SmartThemeBodyColor, #fff);
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .claude-review-settings .cr-section-title i {
     color: var(--SmartThemeEmColor, #d4a373);
+    font-size: 16px;
 }
 
 .claude-review-settings .cr-form-row {
     display: flex;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .claude-review-settings .cr-form-row label {
     min-width: 100px;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--SmartThemeBodyColor, #ccc);
     flex-shrink: 0;
 }
@@ -83,13 +94,15 @@
 .claude-review-settings .cr-form-row select,
 .claude-review-settings .cr-form-row textarea {
     flex: 1;
+    min-width: 0;
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
-    border-radius: 4px;
-    padding: 6px 10px;
+    border-radius: 6px;
+    padding: 8px 12px;
     color: var(--SmartThemeBodyColor, #fff);
-    font-size: 13px;
+    font-size: 14px;
     outline: none;
+    min-height: 36px;
 }
 
 .claude-review-settings .cr-form-row input:focus,
@@ -99,9 +112,10 @@
 }
 
 .claude-review-settings .cr-form-row input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     accent-color: var(--SmartThemeEmColor, #d4a373);
+    flex-shrink: 0;
 }
 
 .claude-review-settings .cr-form-row textarea {
@@ -109,35 +123,76 @@
     resize: vertical;
     font-family: monospace;
     line-height: 1.5;
+    width: 100%;
 }
 
 .claude-review-settings .cr-form-row .cr-hint {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--SmartThemeBlurTintColor, #888);
     margin-top: 4px;
     flex-basis: 100%;
     margin-left: 110px;
 }
 
+@media (max-width: 600px) {
+    .claude-review-settings .cr-form-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .claude-review-settings .cr-form-row label {
+        min-width: auto;
+        font-size: 13px;
+    }
+
+    .claude-review-settings .cr-form-row input,
+    .claude-review-settings .cr-form-row select,
+    .claude-review-settings .cr-form-row textarea {
+        width: 100%;
+        font-size: 16px;
+    }
+
+    .claude-review-settings .cr-form-row .cr-hint {
+        margin-left: 0;
+    }
+
+    .claude-review-settings .cr-btn-group {
+        flex-direction: column;
+    }
+
+    .claude-review-settings .cr-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 44px;
+    }
+}
+
 .claude-review-settings .cr-btn-group {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin-top: 10px;
+    margin-top: 12px;
 }
 
 .claude-review-settings .cr-btn {
-    padding: 6px 14px;
+    padding: 8px 16px;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.5));
     color: var(--SmartThemeBodyColor, #fff);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 14px;
     transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    touch-action: manipulation;
 }
 
-.claude-review-settings .cr-btn:hover {
+.claude-review-settings .cr-btn:hover,
+.claude-review-settings .cr-btn:active {
     background: var(--SmartThemeEmColor, rgba(212, 163, 115, 0.2));
     border-color: var(--SmartThemeEmColor, #d4a373);
 }
@@ -146,9 +201,11 @@
     background: var(--SmartThemeEmColor, #d4a373);
     color: #000;
     border-color: var(--SmartThemeEmColor, #d4a373);
+    font-weight: bold;
 }
 
-.claude-review-settings .cr-btn.primary:hover {
+.claude-review-settings .cr-btn.primary:hover,
+.claude-review-settings .cr-btn.primary:active {
     background: #e8b88a;
 }
 
@@ -159,10 +216,11 @@
 
 .claude-review-settings .cr-status-badge {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
     font-weight: bold;
+    margin-left: auto;
 }
 
 .claude-review-settings .cr-status-badge.active {
@@ -181,9 +239,9 @@
     display: inline-block;
     background: rgba(100, 100, 255, 0.15);
     color: #aab8ff;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
     font-family: monospace;
     margin: 0 2px;
 }
@@ -191,5 +249,5 @@
 .claude-review-settings .cr-divider {
     height: 1px;
     background: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
-    margin: 12px 0;
+    margin: 14px 0;
 }
