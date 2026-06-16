@@ -1,13 +1,10 @@
 
-/* 外层大抽屉标题优化 */
 #extension_extension_ai-guidance-settings .inline-drawer-header {
     background-color: rgba(20, 30, 50, 0.5);
     border-radius: 5px;
     padding: 10px;
     margin-bottom: 10px;
 }
-
-/* 针对“场外指导”系统消息的特殊样式 */
 .mes[is_system="true"].guidance-card {
     border: 1px dashed #5A95D6 !important;
     background-color: rgba(20, 30, 50, 0.85) !important;
