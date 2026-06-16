@@ -1,3 +1,12 @@
+
+/* 外层大抽屉标题优化 */
+#extension_extension_ai-guidance-settings .inline-drawer-header {
+    background-color: rgba(20, 30, 50, 0.5);
+    border-radius: 5px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
 /* 针对“场外指导”系统消息的特殊样式 */
 .mes[is_system="true"].guidance-card {
     border: 1px dashed #5A95D6 !important;
@@ -11,30 +20,7 @@
     margin-right: auto !important;
     float: none !important;
 }
-
-/* 隐藏默认的系统标签和名称框 */
-.guidance-card .name_text {
-    display: none !important;
-}
-.guidance-card .mes_block {
-    margin-left: 0 !important;
-}
-
-/* 卡片头部样式 */
-.guidance-card-header {
-    color: #A8D8FF;
-    font-weight: bold;
-    font-size: 0.9em;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-/* 卡片内容样式 */
-.guidance-card-content {
-    color: #E0E0E0;
-    font-size: 0.95em;
-    line-height: 1.5;
-    white-space: pre-wrap;
-}
+.guidance-card .name_text { display: none !important; }
+.guidance-card .mes_block { margin-left: 0 !important; }
+.guidance-card-header { color: #A8D8FF; font-weight: bold; font-size: 0.9em; margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+.guidance-card-content { color: #E0E0E0; font-size: 0.95em; line-height: 1.5; white-space: pre-wrap; }
