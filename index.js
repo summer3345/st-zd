@@ -320,7 +320,7 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <label>触发轮次 轮)</label>
+                    <label>触发次数（用户输入）</label>
                     <input type="number" id="dr-trigger-rounds" class="text_pole" value="${settings.triggerRounds}" min="1">
                     <div class="dr-status" id="dr-status">${getStatusText()}</div>
                     <div style="margin-top: 10px;">
