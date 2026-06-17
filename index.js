@@ -1,4 +1,7 @@
-/* * 场外导演 * SillyTavern 插件 - 引入第二模型进行复盘和场外指导 (最终版) */
+﻿/*
+ * 场外导演
+ * SillyTavern 插件 - 引入第二模型进行复盘和场外指导 (最终版)
+ */
 
 const EXT_NAME = "director-review";
 const DEFAULTS = {
@@ -31,14 +34,26 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 统计所有user消息总数（包括被隐藏的），计算进度
+// 统计新发送的user消息（排除编辑后重新发送的），计算进度
 function getProgress() {
     const c = ctx();
     if (!c.chat) return 0;
-    const userMsgCount = c.chat.filter(m => m.is_user).length;
     const trigger = ctx().extensionSettings[EXT_NAME].triggerRounds || 1;
-    let progress = userMsgCount % trigger;
-    if (progress === 0 && userMsgCount > 0) progress = trigger;
+
+    // 只统计最新发送的user消息，排除编辑后重新发送的
+    let newUserCount = 0;
+    const seenMessages = new Set();
+
+    for (let i = c.chat.length - 1; i >= 0; i--) {
+        const msg = c.chat[i];
+        if (msg.is_user && !seenMessages.has(msg.id)) {
+            seenMessages.add(msg.id);
+            newUserCount++;
+        }
+    }
+
+    let progress = newUserCount % trigger;
+    if (progress === 0 && newUserCount > 0) progress = trigger;
     return progress;
 }
 
@@ -79,7 +94,7 @@ async function fetchModels() {
 function getActiveWorldInfo() {
     const c = ctx();
     if (!c.chat || c.chat.length === 0) return "";
-    
+
     const lastMsg = c.chat[c.chat.length - 1];
     if (lastMsg && lastMsg.extra && lastMsg.extra.world_info) {
         let text = "";
@@ -101,7 +116,7 @@ function getChatHistory(depth) {
     if (!c.chat) return "";
     let history = [];
     const startIdx = depth > 0 ? Math.max(0, c.chat.length - depth) : 0;
-    
+
     for (let i = startIdx; i < c.chat.length; i++) {
         const msg = c.chat[i];
         // 过滤系统消息
@@ -119,7 +134,7 @@ async function callAPI(prompt) {
     const c = ctx().extensionSettings[EXT_NAME];
     if (!c.apiEndpoint || !c.model) throw new Error("请先配置 API 和模型");
     const url = normalizeApiBase(c.apiEndpoint) + "/chat/completions";
-    
+
     const body = {
         model: c.model,
         messages: [
@@ -144,7 +159,7 @@ async function callAPI(prompt) {
 async function runAnalysis(isRefresh = false) {
     const c = ctx().extensionSettings[EXT_NAME];
     if (!c.enabled && !isRefresh) return;
-    
+
     $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", true);
     $("#dr-status").html('<span class="dr-loader"></span> 正在分析上下文并生成指导...');
 
@@ -161,18 +176,18 @@ async function runAnalysis(isRefresh = false) {
         prompt += `【最近聊天记录】\n${getChatHistory(c.readDepth)}`;
 
         const result = await callAPI(prompt);
-        
+
         const chat = ctx().chat;
         if (chat.length > 0) {
             const lastIdx = chat.length - 1;
             const msg = chat[lastIdx];
-            
+
             // 防污染：明确告知主模型这是系统插入的指导，禁止自己生成
             const tag = `\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
-            
+
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
-            
+
             // 安全刷新 DOM，使用酒馆原生格式化渲染
             const el = $(`#chat .mes[mesid="${lastIdx}"] .mes_text`);
             if (el.length) {
@@ -181,7 +196,10 @@ async function runAnalysis(isRefresh = false) {
                 el.html(formatted);
             }
         }
-        
+
+        // 分析完成后重置计数器
+        resetCounter();
+
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
         console.error("[Director] Analysis error:", e);
@@ -191,10 +209,18 @@ async function runAnalysis(isRefresh = false) {
     }
 }
 
+// 重置计数器函数
+function resetCounter() {
+    // 在分析完成后重置计数器，确保下一次触发能正确计算
+    // 这里我们不需要显式重置任何变量，因为计数器是基于聊天记录实时计算的
+    // 但是我们需要确保UI显示正确
+    $("#dr-status").text(getStatusText());
+}
+
 function onMessageReceived(idx) {
     const c = ctx().extensionSettings[EXT_NAME];
     if (!c.enabled) return;
-    
+
     const msg = ctx().chat[idx];
     if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
 
@@ -202,10 +228,10 @@ function onMessageReceived(idx) {
     $("#dr-status").text(getStatusText());
 
     const trigger = c.triggerRounds || 1;
-    const userMsgCount = ctx().chat.filter(m => m.is_user).length;
-    
+    const newUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+
     // 检查是否到达触发条件
-    if (userMsgCount > 0 && userMsgCount % trigger === 0) {
+    if (newUserCount > 0 && newUserCount % trigger === 0) {
         // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
         setTimeout(() => {
             runAnalysis(false);
@@ -269,7 +295,7 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <label>触发轮次 (AI回复几次后触发)</label>
+                    <label>触发轮次 (User输入几次后触发)</label>
                     <input type="number" id="dr-trigger-rounds" class="text_pole" value="${c.triggerRounds}" min="1">
                     <div class="dr-status" id="dr-status">${getStatusText()}</div>
                 </div>
@@ -313,7 +339,7 @@ function createUI() {
         save("model", $("#dr-model").val());
         try { await callAPI("Hi"); alert("连接成功"); } catch(e) { alert("连接失败: " + e.message); }
     });
-    
+
     $("#dr-btn-analyze").on("click", () => runAnalysis(false));
     $("#dr-btn-refresh").on("click", () => runAnalysis(true));
 }
@@ -322,7 +348,7 @@ function init() {
     loadSettings();
     createUI();
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.3)");
+    console.log("[Director] 插件已加载 (v1.5)");
 }
 
 const waitAndInit = setInterval(() => {
