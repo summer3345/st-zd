@@ -1,6 +1,7 @@
 ﻿/*
- * 场外导演 (v1.6)
- * 修复计数器逻辑、世界书读取，增强稳定性
+ * 场外导演 - 计数器修复与增强完整版
+ * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
+ * 整合 DeepSeek 建议并进一步优化状态管理与兼容性
  */
 
 const EXT_NAME = "director-review";
@@ -13,12 +14,13 @@ const DEFAULTS = {
     readLorebook: true,
     readDepth: 10,
     triggerRounds: 5,
-    systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。"
+    systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
+    // 持久化的用户消息计数器
+    userMessageCount: 0
 };
 
-// 独立计数器，不依赖聊天记录扫描
-let userMessageCount = 0;
-let pendingAnalysis = false;   // 是否已有待执行的分析
+// 模块级变量，管理待分析状态
+let pendingAnalysis = false;
 
 function ctx() {
     return SillyTavern.getContext();
@@ -38,12 +40,13 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 进度计算完全基于独立计数器
+// 进度计算基于持久化的计数器
 function getProgress() {
     const settings = ctx().extensionSettings[EXT_NAME];
     const trigger = settings.triggerRounds || 1;
-    let progress = userMessageCount % trigger;
-    if (progress === 0 && userMessageCount > 0) progress = trigger;
+    let count = settings.userMessageCount || 0;
+    let progress = count % trigger;
+    if (progress === 0 && count > 0) progress = trigger;
     return progress;
 }
 
@@ -84,30 +87,31 @@ async function fetchModels() {
     }
 }
 
-// 修复世界书读取：兼容多种酒馆数据结构
+// 增强的世界书读取：兼容多种数据结构
 function getActiveWorldInfo() {
     const c = ctx();
     if (!c.chat || c.chat.length === 0) return "";
 
     const lastMsg = c.chat[c.chat.length - 1];
     const activeUids = lastMsg?.extra?.world_info;
-    if (!activeUids || Object.keys(activeUids).length === 0) return "";
+    if (!activeUids || (typeof activeUids !== 'object' && !Array.isArray(activeUids))) return "";
 
     const worldInfo = c.world_info;
     if (!worldInfo) return "";
 
     let text = "";
 
-    // 兼容对象格式：{ uid: { content: ... } }
+    // 兼容 world_info 是对象的情况：{ uid: { content: ... } }
     if (typeof worldInfo === 'object' && !Array.isArray(worldInfo)) {
+        const entries = worldInfo.entries || worldInfo;
         for (const uid in activeUids) {
-            const entry = worldInfo[uid];
+            const entry = entries[uid];
             if (entry && entry.content) {
                 text += entry.content + "\n\n";
             }
         }
     }
-    // 兼容数组格式：[ { uid: ..., content: ... } ]
+    // 兼容 world_info 是数组的情况：[ { uid: ..., content: ... } ]
     else if (Array.isArray(worldInfo)) {
         for (const uid in activeUids) {
             const entry = worldInfo.find(e => e.uid == uid || e.id == uid);
@@ -205,12 +209,14 @@ async function runAnalysis(isRefresh = false) {
             }
         }
 
-        // 分析完成后彻底重置
+        // 分析完成后重置计数器并清除待分析标志
         resetCounter(true);
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
         console.error("[Director] Analysis error:", e);
         $("#dr-status").text("分析失败: " + e.message);
+        // 即使失败，也清除待分析标志，避免卡住
+        pendingAnalysis = false;
     } finally {
         $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", false);
     }
@@ -218,26 +224,30 @@ async function runAnalysis(isRefresh = false) {
 
 // 重置计数器与待触发标志
 function resetCounter(clearPending = false) {
-    userMessageCount = 0;
+    const settings = ctx().extensionSettings[EXT_NAME];
+    settings.userMessageCount = 0; // 重置持久化计数器
+    save("userMessageCount", 0);    // 保存重置
     if (clearPending) pendingAnalysis = false;
     $("#dr-status").text(getStatusText());
 }
 
-// 用户发送消息时调用
+// 用户发送消息时调用 - 计数器累加
 function onUserMessage() {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled) return;
 
-    userMessageCount++;
+    settings.userMessageCount = (settings.userMessageCount || 0) + 1;
+    save("userMessageCount", settings.userMessageCount); // 持久化
+
     $("#dr-status").text(getStatusText());
 
-    if (userMessageCount >= settings.triggerRounds) {
-        userMessageCount = 0;          // 立即归零，避免重复判断
-        pendingAnalysis = true;        // 标记有待执行的分析
+    // 检查是否达到触发条件
+    if (settings.userMessageCount >= settings.triggerRounds) {
+        pendingAnalysis = true; // 设置待分析标志，等待 AI 回复后触发
     }
 }
 
-// AI 消息接收时调用
+// AI 消息接收时调用 - 实际触发分析
 function onMessageReceived(idx) {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled || !pendingAnalysis) return;
@@ -245,8 +255,10 @@ function onMessageReceived(idx) {
     const msg = ctx().chat[idx];
     if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
 
-    // 只在第一条有效的 AI 回复时触发分析
+    // 立即清除标志，防止重复触发
     pendingAnalysis = false;
+
+    // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
     setTimeout(() => {
         runAnalysis(false);
     }, 3000);
@@ -308,9 +320,12 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <label>触发轮次 (User输入几次后触发)</label>
+                    <label>触发轮次 轮)</label>
                     <input type="number" id="dr-trigger-rounds" class="text_pole" value="${settings.triggerRounds}" min="1">
                     <div class="dr-status" id="dr-status">${getStatusText()}</div>
+                    <div style="margin-top: 10px;">
+                        <input type="button" id="dr-btn-reset-counter" class="menu_button" value="重置计数器" title="手动重置进度计数">
+                    </div>
                 </div>
             </div>
 
@@ -351,6 +366,14 @@ function createUI() {
     });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
 
+    // 手动重置计数器按钮事件绑定
+    $("#dr-btn-reset-counter").on("click", function() {
+        if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
+            resetCounter(true); // 传入 true 同时清除 pendingAnalysis 状态
+            $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
+        }
+    });
+
     $("#dr-btn-models").on("click", fetchModels);
     $("#dr-btn-test").on("click", async () => {
         save("model", $("#dr-model").val());
@@ -374,7 +397,7 @@ function init() {
     ctx().eventSource.on(ctx().event_types.MESSAGE_SENT, onUserMessage);
     // 监听 AI 回复事件（实际触发分析）
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.6)");
+    console.log("[Director] 插件已加载 (v1.6 - 计数器修复与增强完整版)");
 }
 
 const waitAndInit = setInterval(() => {
@@ -386,3 +409,4 @@ const waitAndInit = setInterval(() => {
         }
     }
 }, 300);
+
