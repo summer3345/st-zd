@@ -1,5 +1,5 @@
 ﻿/*
- * 场外导演 - 纯变量累加计数版
+ * 场外导演 - 计数器修复版
  * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
  */
 
@@ -14,8 +14,8 @@ const DEFAULTS = {
     readDepth: 10,
     triggerRounds: 5,
     systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
-    // 新增：独立计数器，记录User消息发送次数（与聊天记录无关）
-    currentCount: 0
+    // 新增：基准计数器，记录上次触发时的用户消息数量
+    baselineUserCount: 0
 };
 
 function ctx() {
@@ -36,14 +36,21 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 修改：基于独立计数器计算进度（与聊天记录无关）
+// 修复后的进度计算函数 - 基于基准计数器
 function getProgress() {
-    const c = ctx().extensionSettings[EXT_NAME];
-    const trigger = c.triggerRounds || 1;
-    const currentCount = c.currentCount || 0;
+    const c = ctx();
+    if (!c.chat) return 0;
+    const trigger = ctx().extensionSettings[EXT_NAME].triggerRounds || 1;
+    const baseline = ctx().extensionSettings[EXT_NAME].baselineUserCount || 0;
 
-    let progress = currentCount % trigger;
-    if (progress === 0 && currentCount > 0) progress = trigger;
+    // 统计当前所有用户消息
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 计算自上次触发以来的新增用户消息数
+    const newUserCount = Math.max(0, currentUserCount - baseline);
+
+    let progress = newUserCount % trigger;
+    if (progress === 0 && newUserCount > 0) progress = trigger;
     return progress;
 }
 
@@ -181,7 +188,7 @@ async function runAnalysis(isRefresh = false) {
             }
         }
 
-        // 修改：分析完成后重置独立计数器
+        // 修复：分析成功后重置计数器，设置新的基准点
         resetCounterAfterTrigger();
 
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
@@ -193,13 +200,21 @@ async function runAnalysis(isRefresh = false) {
     }
 }
 
-// 修改：重置独立计数器（归0）
+// 修复后的重置计数器函数 - 真正重置基准点
 function resetCounterAfterTrigger() {
-    save("currentCount", 0);
+    const c = ctx();
+    if (!c.chat) return;
+    
+    // 获取当前用户消息总数
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 更新基准计数器为当前值，后续只统计新增消息
+    save("baselineUserCount", currentUserCount);
+    
+    // 更新UI显示
     $("#dr-status").text(getStatusText());
 }
 
-// 修改：onMessageReceived中增加独立计数逻辑
 function onMessageReceived(idx) {
     const c = ctx().extensionSettings[EXT_NAME];
     if (!c.enabled) return;
@@ -210,17 +225,17 @@ function onMessageReceived(idx) {
     // 更新进度显示
     $("#dr-status").text(getStatusText());
 
-    // 只有User消息才增加独立计数器
-    if (msg.is_user) {
-        const newCount = (c.currentCount || 0) + 1;
-        save("currentCount", newCount);
+    const trigger = c.triggerRounds || 1;
+    const baseline = c.baselineUserCount || 0;
+    const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+    const newUserCount = Math.max(0, currentUserCount - baseline);
 
-        const trigger = c.triggerRounds || 1;
-        if (newCount > 0 && newCount % trigger === 0) {
-            setTimeout(() => {
-                runAnalysis(false);
-            }, 3000);
-        }
+    // 检查是否到达触发条件
+    if (newUserCount > 0 && newUserCount % trigger === 0) {
+        // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
+        setTimeout(() => {
+            runAnalysis(false);
+        }, 3000);
     }
 }
 
@@ -322,10 +337,11 @@ function createUI() {
     $("#dr-trigger-rounds").on("input", function() { save("triggerRounds", parseInt(this.value) || 1); $("#dr-status").text(getStatusText()); });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
 
-    // 修改：手动重置按钮重置独立计数器
+    // 新增：手动重置计数器按钮
     $("#dr-btn-reset-counter").on("click", function() {
         if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
-            save("currentCount", 0);
+            const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+            save("baselineUserCount", currentUserCount);
             $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
         }
     });
@@ -344,7 +360,7 @@ function init() {
     loadSettings();
     createUI();
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.8 - 纯变量累加版)");
+    console.log("[Director] 插件已加载 (v1.6 - 计数器修复版)");
 }
 
 const waitAndInit = setInterval(() => {
