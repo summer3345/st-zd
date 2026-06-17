@@ -1,4 +1,4 @@
-/* * 场外导演 * SillyTavern 插件 - 引入第二模型进行复盘和场外指导 */
+/* * 场外导演 * SillyTavern 插件 - 引入第二模型进行复盘和场外指导 (最终版) */
 
 const EXT_NAME = "director-review";
 const DEFAULTS = {
@@ -10,7 +10,6 @@ const DEFAULTS = {
     readLorebook: true,
     readDepth: 10,
     triggerRounds: 5,
-    currentCount: 0,
     systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。"
 };
 
@@ -32,9 +31,19 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
+// 统计所有user消息总数（包括被隐藏的），计算进度
+function getProgress() {
+    const c = ctx();
+    if (!c.chat) return 0;
+    const userMsgCount = c.chat.filter(m => m.is_user).length;
+    const trigger = ctx().extensionSettings[EXT_NAME].triggerRounds || 1;
+    let progress = userMsgCount % trigger;
+    if (progress === 0 && userMsgCount > 0) progress = trigger;
+    return progress;
+}
+
 function getStatusText() {
-    const c = ctx().extensionSettings[EXT_NAME];
-    return `当前进度：${c.currentCount} / ${c.triggerRounds}`;
+    return `当前进度：${getProgress()} / ${ctx().extensionSettings[EXT_NAME].triggerRounds}`;
 }
 
 function normalizeApiBase(base) {
@@ -86,6 +95,7 @@ function getActiveWorldInfo() {
     return "";
 }
 
+// 修正后的getChatHistory函数：读取所有user输入和100层以内未被隐藏的AI消息
 function getChatHistory(depth) {
     const c = ctx();
     if (!c.chat) return "";
@@ -94,9 +104,13 @@ function getChatHistory(depth) {
     
     for (let i = startIdx; i < c.chat.length; i++) {
         const msg = c.chat[i];
-        if (msg.is_system || msg.is_hidden) continue;
-        const role = msg.is_user ? "User" : c.name2;
-        history.push(`${role}: ${msg.mes}`);
+        // 过滤系统消息
+        if (msg.is_system) continue;
+        // 保留user输入和未隐藏的AI消息
+        if (msg.is_user || (!msg.is_user && !msg.is_hidden)) {
+            const role = msg.is_user ? "User" : c.name2;
+            history.push(`${role}: ${msg.mes}`);
+        }
     }
     return history.join("\n\n");
 }
@@ -152,19 +166,20 @@ async function runAnalysis(isRefresh = false) {
         if (chat.length > 0) {
             const lastIdx = chat.length - 1;
             const msg = chat[lastIdx];
-            const tag = `\n\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
+            
+            // 防污染：明确告知主模型这是系统插入的指导，禁止自己生成
+            const tag = `\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
             
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
             
+            // 安全刷新 DOM，使用酒馆原生格式化渲染
             const el = $(`#chat .mes[mesid="${lastIdx}"] .mes_text`);
             if (el.length) {
-                el.html(el.html() + tag.replace(/\n/g, "<br>"));
+                // 优先使用酒馆自带的消息格式化函数，确保 markdown 和 html 正常解析
+                const formatted = ctx().messageFormatting ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user) : msg.mes;
+                el.html(formatted);
             }
-        }
-
-        if (!isRefresh) {
-            save("currentCount", 0);
         }
         
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
@@ -183,12 +198,18 @@ function onMessageReceived(idx) {
     const msg = ctx().chat[idx];
     if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
 
-    let current = c.currentCount + 1;
-    save("currentCount", current);
+    // 更新进度显示
     $("#dr-status").text(getStatusText());
 
-    if (current >= c.triggerRounds) {
-        runAnalysis(false);
+    const trigger = c.triggerRounds || 1;
+    const userMsgCount = ctx().chat.filter(m => m.is_user).length;
+    
+    // 检查是否到达触发条件
+    if (userMsgCount > 0 && userMsgCount % trigger === 0) {
+        // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
+        setTimeout(() => {
+            runAnalysis(false);
+        }, 3000);
     }
 }
 
@@ -301,7 +322,7 @@ function init() {
     loadSettings();
     createUI();
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载");
+    console.log("[Director] 插件已加载 (v1.3)");
 }
 
 const waitAndInit = setInterval(() => {
