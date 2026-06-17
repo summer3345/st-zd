@@ -1,6 +1,6 @@
 ﻿/*
- * 场外导演
- * SillyTavern 插件 - 引入第二模型进行复盘和场外指导 (最终版)
+ * 场外导演 - 计数器修复版
+ * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
  */
 
 const EXT_NAME = "director-review";
@@ -13,7 +13,9 @@ const DEFAULTS = {
     readLorebook: true,
     readDepth: 10,
     triggerRounds: 5,
-    systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。"
+    systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
+    // 新增：基准计数器，记录上次触发时的用户消息数量
+    baselineUserCount: 0
 };
 
 function ctx() {
@@ -34,23 +36,18 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 统计新发送的user消息（排除编辑后重新发送的），计算进度
+// 修复后的进度计算函数 - 基于基准计数器
 function getProgress() {
     const c = ctx();
     if (!c.chat) return 0;
     const trigger = ctx().extensionSettings[EXT_NAME].triggerRounds || 1;
+    const baseline = ctx().extensionSettings[EXT_NAME].baselineUserCount || 0;
 
-    // 只统计最新发送的user消息，排除编辑后重新发送的
-    let newUserCount = 0;
-    const seenMessages = new Set();
-
-    for (let i = c.chat.length - 1; i >= 0; i--) {
-        const msg = c.chat[i];
-        if (msg.is_user && !seenMessages.has(msg.id)) {
-            seenMessages.add(msg.id);
-            newUserCount++;
-        }
-    }
+    // 统计当前所有用户消息
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 计算自上次触发以来的新增用户消息数
+    const newUserCount = Math.max(0, currentUserCount - baseline);
 
     let progress = newUserCount % trigger;
     if (progress === 0 && newUserCount > 0) progress = trigger;
@@ -110,7 +107,6 @@ function getActiveWorldInfo() {
     return "";
 }
 
-// 修正后的getChatHistory函数：读取所有user输入和100层以内未被隐藏的AI消息
 function getChatHistory(depth) {
     const c = ctx();
     if (!c.chat) return "";
@@ -119,9 +115,7 @@ function getChatHistory(depth) {
 
     for (let i = startIdx; i < c.chat.length; i++) {
         const msg = c.chat[i];
-        // 过滤系统消息
         if (msg.is_system) continue;
-        // 保留user输入和未隐藏的AI消息
         if (msg.is_user || (!msg.is_user && !msg.is_hidden)) {
             const role = msg.is_user ? "User" : c.name2;
             history.push(`${role}: ${msg.mes}`);
@@ -182,23 +176,20 @@ async function runAnalysis(isRefresh = false) {
             const lastIdx = chat.length - 1;
             const msg = chat[lastIdx];
 
-            // 防污染：明确告知主模型这是系统插入的指导，禁止自己生成
             const tag = `\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
 
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
 
-            // 安全刷新 DOM，使用酒馆原生格式化渲染
             const el = $(`#chat .mes[mesid="${lastIdx}"] .mes_text`);
             if (el.length) {
-                // 优先使用酒馆自带的消息格式化函数，确保 markdown 和 html 正常解析
                 const formatted = ctx().messageFormatting ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user) : msg.mes;
                 el.html(formatted);
             }
         }
 
-        // 分析完成后重置计数器
-        resetCounter();
+        // 修复：分析成功后重置计数器，设置新的基准点
+        resetCounterAfterTrigger();
 
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
@@ -209,11 +200,18 @@ async function runAnalysis(isRefresh = false) {
     }
 }
 
-// 重置计数器函数
-function resetCounter() {
-    // 在分析完成后重置计数器，确保下一次触发能正确计算
-    // 这里我们不需要显式重置任何变量，因为计数器是基于聊天记录实时计算的
-    // 但是我们需要确保UI显示正确
+// 修复后的重置计数器函数 - 真正重置基准点
+function resetCounterAfterTrigger() {
+    const c = ctx();
+    if (!c.chat) return;
+    
+    // 获取当前用户消息总数
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 更新基准计数器为当前值，后续只统计新增消息
+    save("baselineUserCount", currentUserCount);
+    
+    // 更新UI显示
     $("#dr-status").text(getStatusText());
 }
 
@@ -228,7 +226,9 @@ function onMessageReceived(idx) {
     $("#dr-status").text(getStatusText());
 
     const trigger = c.triggerRounds || 1;
-    const newUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+    const baseline = c.baselineUserCount || 0;
+    const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+    const newUserCount = Math.max(0, currentUserCount - baseline);
 
     // 检查是否到达触发条件
     if (newUserCount > 0 && newUserCount % trigger === 0) {
@@ -298,6 +298,9 @@ function createUI() {
                     <label>触发轮次 (User输入几次后触发)</label>
                     <input type="number" id="dr-trigger-rounds" class="text_pole" value="${c.triggerRounds}" min="1">
                     <div class="dr-status" id="dr-status">${getStatusText()}</div>
+                    <div style="margin-top: 10px;">
+                        <input type="button" id="dr-btn-reset-counter" class="menu_button" value="重置计数器" title="手动重置进度计数">
+                    </div>
                 </div>
             </div>
 
@@ -334,6 +337,15 @@ function createUI() {
     $("#dr-trigger-rounds").on("input", function() { save("triggerRounds", parseInt(this.value) || 1); $("#dr-status").text(getStatusText()); });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
 
+    // 新增：手动重置计数器按钮
+    $("#dr-btn-reset-counter").on("click", function() {
+        if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
+            const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+            save("baselineUserCount", currentUserCount);
+            $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
+        }
+    });
+
     $("#dr-btn-models").on("click", fetchModels);
     $("#dr-btn-test").on("click", async () => {
         save("model", $("#dr-model").val());
@@ -348,7 +360,7 @@ function init() {
     loadSettings();
     createUI();
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.5)");
+    console.log("[Director] 插件已加载 (v1.6 - 计数器修复版)");
 }
 
 const waitAndInit = setInterval(() => {
@@ -360,3 +372,4 @@ const waitAndInit = setInterval(() => {
         }
     }
 }, 300);
+
