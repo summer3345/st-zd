@@ -196,7 +196,7 @@ async function runAnalysis(isRefresh = false) {
             const lastIdx = chat.length - 1;
             const msg = chat[lastIdx];
 
-            const tag = `\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
+            const tag = `\n\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n\n${result}\n\n</details>`;
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
 
