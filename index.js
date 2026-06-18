@@ -1,7 +1,7 @@
 ﻿/*
- * 场外导演 - 计数器修复与破甲优化版
+ * 场外导演 - 计数器修复与增强完整版
  * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
- * 优化：合并为单条 user 消息发送，提升破甲成功率
+ * 整合 DeepSeek 建议并进一步优化状态管理与兼容性
  */
 
 const EXT_NAME = "director-review";
@@ -15,9 +15,11 @@ const DEFAULTS = {
     readDepth: 10,
     triggerRounds: 5,
     systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
+    // 持久化的用户消息计数器
     userMessageCount: 0
 };
 
+// 模块级变量，管理待分析状态
 let pendingAnalysis = false;
 
 function ctx() {
@@ -38,6 +40,7 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
+// 进度计算基于持久化的计数器
 function getProgress() {
     const settings = ctx().extensionSettings[EXT_NAME];
     const trigger = settings.triggerRounds || 1;
@@ -84,6 +87,7 @@ async function fetchModels() {
     }
 }
 
+// 增强的世界书读取：兼容多种数据结构
 function getActiveWorldInfo() {
     const c = ctx();
     if (!c.chat || c.chat.length === 0) return "";
@@ -97,6 +101,7 @@ function getActiveWorldInfo() {
 
     let text = "";
 
+    // 兼容 world_info 是对象的情况：{ uid: { content: ... } }
     if (typeof worldInfo === 'object' && !Array.isArray(worldInfo)) {
         const entries = worldInfo.entries || worldInfo;
         for (const uid in activeUids) {
@@ -106,6 +111,7 @@ function getActiveWorldInfo() {
             }
         }
     }
+    // 兼容 world_info 是数组的情况：[ { uid: ..., content: ... } ]
     else if (Array.isArray(worldInfo)) {
         for (const uid in activeUids) {
             const entry = worldInfo.find(e => e.uid == uid || e.id == uid);
@@ -140,15 +146,13 @@ async function callAPI(prompt) {
     if (!settings.apiEndpoint || !settings.model) throw new Error("请先配置 API 和模型");
     const url = normalizeApiBase(settings.apiEndpoint) + "/chat/completions";
 
-    // 核心破甲优化：将所有内容合并为一条 user 消息发送，避开 system 角色的严格审查
     const body = {
         model: settings.model,
         messages: [
+            { role: "system", content: settings.systemPrompt },
             { role: "user", content: prompt }
         ],
-        temperature: 0.6, // 稍微提高一点随机性，有时有助于绕过死板的拦截
-        max_tokens: 2000, // 确保输出长度
-        top_p: 0.95,
+        temperature: 0.4,
         stream: false
     };
 
@@ -174,10 +178,7 @@ async function runAnalysis(isRefresh = false) {
     $("#dr-status").html('<span class="dr-loader"></span> 正在分析上下文并生成指导...');
 
     try {
-        // 1. 破甲提示词必须放在最前面
-        let prompt = `${settings.systemPrompt}\n\n---\n\n`;
-        
-        // 2. 紧跟上下文信息
+        let prompt = "";
         if (settings.readChar) {
             const char = ctx().characters[ctx().characterId];
             if (char) prompt += `【角色设定】\n${char.description || ""}\n${char.personality || ""}\n\n`;
@@ -208,39 +209,45 @@ async function runAnalysis(isRefresh = false) {
             }
         }
 
+        // 分析完成后重置计数器并清除待分析标志
         resetCounter(true);
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
         console.error("[Director] Analysis error:", e);
         $("#dr-status").text("分析失败: " + e.message);
+        // 即使失败，也清除待分析标志，避免卡住
         pendingAnalysis = false;
     } finally {
         $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", false);
     }
 }
 
+// 重置计数器与待触发标志
 function resetCounter(clearPending = false) {
     const settings = ctx().extensionSettings[EXT_NAME];
-    settings.userMessageCount = 0;
-    save("userMessageCount", 0);
+    settings.userMessageCount = 0; // 重置持久化计数器
+    save("userMessageCount", 0);    // 保存重置
     if (clearPending) pendingAnalysis = false;
     $("#dr-status").text(getStatusText());
 }
 
+// 用户发送消息时调用 - 计数器累加
 function onUserMessage() {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled) return;
 
     settings.userMessageCount = (settings.userMessageCount || 0) + 1;
-    save("userMessageCount", settings.userMessageCount);
+    save("userMessageCount", settings.userMessageCount); // 持久化
 
     $("#dr-status").text(getStatusText());
 
+    // 检查是否达到触发条件
     if (settings.userMessageCount >= settings.triggerRounds) {
-        pendingAnalysis = true;
+        pendingAnalysis = true; // 设置待分析标志，等待 AI 回复后触发
     }
 }
 
+// AI 消息接收时调用 - 实际触发分析
 function onMessageReceived(idx) {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled || !pendingAnalysis) return;
@@ -248,8 +255,10 @@ function onMessageReceived(idx) {
     const msg = ctx().chat[idx];
     if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
 
+    // 立即清除标志，防止重复触发
     pendingAnalysis = false;
 
+    // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
     setTimeout(() => {
         runAnalysis(false);
     }, 3000);
@@ -352,14 +361,15 @@ function createUI() {
     $("#dr-read-depth").on("input", function() { save("readDepth", parseInt(this.value) || 0); });
     $("#dr-trigger-rounds").on("input", function() {
         save("triggerRounds", parseInt(this.value) || 1);
-        resetCounter();
+        resetCounter(); // 修改触发轮次后重置计数
         $("#dr-status").text(getStatusText());
     });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
 
+    // 手动重置计数器按钮事件绑定
     $("#dr-btn-reset-counter").on("click", function() {
         if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
-            resetCounter(true);
+            resetCounter(true); // 传入 true 同时清除 pendingAnalysis 状态
             $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
         }
     });
@@ -371,7 +381,7 @@ function createUI() {
     });
 
     $("#dr-btn-analyze").on("click", () => {
-        pendingAnalysis = false;
+        pendingAnalysis = false; // 手动分析时取消待触发标记
         runAnalysis(false);
     });
     $("#dr-btn-refresh").on("click", () => {
@@ -383,9 +393,11 @@ function createUI() {
 function init() {
     loadSettings();
     createUI();
+    // 监听用户发送消息事件（计数）
     ctx().eventSource.on(ctx().event_types.MESSAGE_SENT, onUserMessage);
+    // 监听 AI 回复事件（实际触发分析）
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.7 - 破甲优化版)");
+    console.log("[Director] 插件已加载 (v1.6 - 计数器修复与增强完整版)");
 }
 
 const waitAndInit = setInterval(() => {
