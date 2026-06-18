@@ -1,7 +1,6 @@
 ﻿/*
- * 场外导演 - 计数器修复与增强完整版
+ * 场外导演 - 计数器修复版
  * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
- * 整合 DeepSeek 建议并进一步优化状态管理与兼容性
  */
 
 const EXT_NAME = "director-review";
@@ -15,12 +14,9 @@ const DEFAULTS = {
     readDepth: 10,
     triggerRounds: 5,
     systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
-    // 持久化的用户消息计数器
-    userMessageCount: 0
+    // 新增：基准计数器，记录上次触发时的用户消息数量
+    baselineUserCount: 0
 };
-
-// 模块级变量，管理待分析状态
-let pendingAnalysis = false;
 
 function ctx() {
     return SillyTavern.getContext();
@@ -40,13 +36,21 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 进度计算基于持久化的计数器
+// 修复后的进度计算函数 - 基于基准计数器
 function getProgress() {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    const trigger = settings.triggerRounds || 1;
-    let count = settings.userMessageCount || 0;
-    let progress = count % trigger;
-    if (progress === 0 && count > 0) progress = trigger;
+    const c = ctx();
+    if (!c.chat) return 0;
+    const trigger = ctx().extensionSettings[EXT_NAME].triggerRounds || 1;
+    const baseline = ctx().extensionSettings[EXT_NAME].baselineUserCount || 0;
+
+    // 统计当前所有用户消息
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 计算自上次触发以来的新增用户消息数
+    const newUserCount = Math.max(0, currentUserCount - baseline);
+
+    let progress = newUserCount % trigger;
+    if (progress === 0 && newUserCount > 0) progress = trigger;
     return progress;
 }
 
@@ -65,21 +69,18 @@ function normalizeApiBase(base) {
 }
 
 async function fetchModels() {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    if (!settings.apiEndpoint) return alert("请先填写 API 地址");
-    const url = normalizeApiBase(settings.apiEndpoint) + "/models";
+    const c = ctx().extensionSettings[EXT_NAME];
+    if (!c.apiEndpoint) return alert("请先填写 API 地址");
+    const url = normalizeApiBase(c.apiEndpoint) + "/models";
     try {
         $("#dr-model").empty().append('<option value="">加载中...</option>');
-        const res = await fetch(url, {
-            method: "GET",
-            headers: settings.apiKey ? { "Authorization": "Bearer " + settings.apiKey } : {}
-        });
+        const res = await fetch(url, { method: "GET", headers: c.apiKey ? { "Authorization": "Bearer " + c.apiKey } : {} });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         const models = data.data ? data.data.map(m => m.id) : (data.models ? data.models.map(m => m.id) : []);
         $("#dr-model").empty().append('<option value="">请选择模型</option>');
         models.forEach(id => {
-            $("#dr-model").append(`<option value="${id}" ${id === settings.model ? 'selected' : ''}>${id}</option>`);
+            $("#dr-model").append(`<option value="${id}" ${id === c.model ? 'selected' : ''}>${id}</option>`);
         });
     } catch (e) {
         console.error("[Director] Fetch models error:", e);
@@ -87,41 +88,23 @@ async function fetchModels() {
     }
 }
 
-// 增强的世界书读取：兼容多种数据结构
 function getActiveWorldInfo() {
     const c = ctx();
     if (!c.chat || c.chat.length === 0) return "";
 
     const lastMsg = c.chat[c.chat.length - 1];
-    const activeUids = lastMsg?.extra?.world_info;
-    if (!activeUids || (typeof activeUids !== 'object' && !Array.isArray(activeUids))) return "";
-
-    const worldInfo = c.world_info;
-    if (!worldInfo) return "";
-
-    let text = "";
-
-    // 兼容 world_info 是对象的情况：{ uid: { content: ... } }
-    if (typeof worldInfo === 'object' && !Array.isArray(worldInfo)) {
-        const entries = worldInfo.entries || worldInfo;
-        for (const uid in activeUids) {
-            const entry = entries[uid];
+    if (lastMsg && lastMsg.extra && lastMsg.extra.world_info) {
+        let text = "";
+        const wInfo = lastMsg.extra.world_info;
+        for (const uid in wInfo) {
+            const entry = c.world_info ? c.world_info[uid] : null;
             if (entry && entry.content) {
                 text += entry.content + "\n\n";
             }
         }
+        return text.trim();
     }
-    // 兼容 world_info 是数组的情况：[ { uid: ..., content: ... } ]
-    else if (Array.isArray(worldInfo)) {
-        for (const uid in activeUids) {
-            const entry = worldInfo.find(e => e.uid == uid || e.id == uid);
-            if (entry && entry.content) {
-                text += entry.content + "\n\n";
-            }
-        }
-    }
-
-    return text.trim();
+    return "";
 }
 
 function getChatHistory(depth) {
@@ -142,14 +125,14 @@ function getChatHistory(depth) {
 }
 
 async function callAPI(prompt) {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    if (!settings.apiEndpoint || !settings.model) throw new Error("请先配置 API 和模型");
-    const url = normalizeApiBase(settings.apiEndpoint) + "/chat/completions";
+    const c = ctx().extensionSettings[EXT_NAME];
+    if (!c.apiEndpoint || !c.model) throw new Error("请先配置 API 和模型");
+    const url = normalizeApiBase(c.apiEndpoint) + "/chat/completions";
 
     const body = {
-        model: settings.model,
+        model: c.model,
         messages: [
-            { role: "system", content: settings.systemPrompt },
+            { role: "system", content: c.systemPrompt },
             { role: "user", content: prompt }
         ],
         temperature: 0.4,
@@ -158,10 +141,7 @@ async function callAPI(prompt) {
 
     const res = await fetch(url, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + settings.apiKey
-        },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.apiKey },
         body: JSON.stringify(body)
     });
 
@@ -171,23 +151,23 @@ async function callAPI(prompt) {
 }
 
 async function runAnalysis(isRefresh = false) {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    if (!settings.enabled && !isRefresh) return;
+    const c = ctx().extensionSettings[EXT_NAME];
+    if (!c.enabled && !isRefresh) return;
 
     $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", true);
     $("#dr-status").html('<span class="dr-loader"></span> 正在分析上下文并生成指导...');
 
     try {
         let prompt = "";
-        if (settings.readChar) {
+        if (c.readChar) {
             const char = ctx().characters[ctx().characterId];
             if (char) prompt += `【角色设定】\n${char.description || ""}\n${char.personality || ""}\n\n`;
         }
-        if (settings.readLorebook) {
+        if (c.readLorebook) {
             const wi = getActiveWorldInfo();
             if (wi) prompt += `【激活的世界书】\n${wi}\n\n`;
         }
-        prompt += `【最近聊天记录】\n${getChatHistory(settings.readDepth)}`;
+        prompt += `【最近聊天记录】\n${getChatHistory(c.readDepth)}`;
 
         const result = await callAPI(prompt);
 
@@ -197,75 +177,70 @@ async function runAnalysis(isRefresh = false) {
             const msg = chat[lastIdx];
 
             const tag = `\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n${result}\n\n</details>`;
+
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
 
             const el = $(`#chat .mes[mesid="${lastIdx}"] .mes_text`);
             if (el.length) {
-                const formatted = ctx().messageFormatting
-                    ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user)
-                    : msg.mes;
+                const formatted = ctx().messageFormatting ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user) : msg.mes;
                 el.html(formatted);
             }
         }
 
-        // 分析完成后重置计数器并清除待分析标志
-        resetCounter(true);
+        // 修复：分析成功后重置计数器，设置新的基准点
+        resetCounterAfterTrigger();
+
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
         console.error("[Director] Analysis error:", e);
         $("#dr-status").text("分析失败: " + e.message);
-        // 即使失败，也清除待分析标志，避免卡住
-        pendingAnalysis = false;
     } finally {
         $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", false);
     }
 }
 
-// 重置计数器与待触发标志
-function resetCounter(clearPending = false) {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    settings.userMessageCount = 0; // 重置持久化计数器
-    save("userMessageCount", 0);    // 保存重置
-    if (clearPending) pendingAnalysis = false;
+// 修复后的重置计数器函数 - 真正重置基准点
+function resetCounterAfterTrigger() {
+    const c = ctx();
+    if (!c.chat) return;
+    
+    // 获取当前用户消息总数
+    const currentUserCount = c.chat.filter(m => m.is_user && !m.is_hidden).length;
+    
+    // 更新基准计数器为当前值，后续只统计新增消息
+    save("baselineUserCount", currentUserCount);
+    
+    // 更新UI显示
     $("#dr-status").text(getStatusText());
 }
 
-// 用户发送消息时调用 - 计数器累加
-function onUserMessage() {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    if (!settings.enabled) return;
-
-    settings.userMessageCount = (settings.userMessageCount || 0) + 1;
-    save("userMessageCount", settings.userMessageCount); // 持久化
-
-    $("#dr-status").text(getStatusText());
-
-    // 检查是否达到触发条件
-    if (settings.userMessageCount >= settings.triggerRounds) {
-        pendingAnalysis = true; // 设置待分析标志，等待 AI 回复后触发
-    }
-}
-
-// AI 消息接收时调用 - 实际触发分析
 function onMessageReceived(idx) {
-    const settings = ctx().extensionSettings[EXT_NAME];
-    if (!settings.enabled || !pendingAnalysis) return;
+    const c = ctx().extensionSettings[EXT_NAME];
+    if (!c.enabled) return;
 
     const msg = ctx().chat[idx];
     if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
 
-    // 立即清除标志，防止重复触发
-    pendingAnalysis = false;
+    // 更新进度显示
+    $("#dr-status").text(getStatusText());
 
-    // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
-    setTimeout(() => {
-        runAnalysis(false);
-    }, 3000);
+    const trigger = c.triggerRounds || 1;
+    const baseline = c.baselineUserCount || 0;
+    const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+    const newUserCount = Math.max(0, currentUserCount - baseline);
+
+    // 检查是否到达触发条件
+    if (newUserCount > 0 && newUserCount % trigger === 0) {
+        // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
+        setTimeout(() => {
+            runAnalysis(false);
+        }, 3000);
+    }
 }
 
 function createUI() {
-    const settings = ctx().extensionSettings[EXT_NAME];
+    const c = ctx().extensionSettings[EXT_NAME];
     const html = `
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
@@ -275,7 +250,7 @@ function createUI() {
         <div class="inline-drawer-content dr-panel">
             <div style="margin-bottom: 10px;">
                 <label class="checkbox_label">
-                    <input type="checkbox" id="dr-enabled" ${settings.enabled ? 'checked' : ''}>
+                    <input type="checkbox" id="dr-enabled" ${c.enabled ? 'checked' : ''}>
                     <span>启用自动纠偏</span>
                 </label>
             </div>
@@ -287,12 +262,12 @@ function createUI() {
                 </div>
                 <div class="inline-drawer-content dr-section">
                     <label>API 地址</label>
-                    <input type="text" id="dr-api-endpoint" class="text_pole" value="${settings.apiEndpoint}" placeholder="https://api.openai.com/v1">
+                    <input type="text" id="dr-api-endpoint" class="text_pole" value="${c.apiEndpoint}" placeholder="https://api.openai.com/v1">
                     <label>API 密钥</label>
-                    <input type="password" id="dr-api-key" class="text_pole" value="${settings.apiKey}" placeholder="sk-...">
+                    <input type="password" id="dr-api-key" class="text_pole" value="${c.apiKey}" placeholder="sk-...">
                     <label>模型</label>
                     <select id="dr-model" class="text_pole">
-                        <option value="${settings.model}">${settings.model ? settings.model + ' (已保存)' : '请先拉取模型'}</option>
+                        <option value="${c.model}">${c.model ? c.model + ' (已保存)' : '请先拉取模型'}</option>
                     </select>
                     <div class="dr-btn-group">
                         <input type="button" id="dr-btn-models" class="menu_button" value="拉取模型">
@@ -307,10 +282,10 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <label class="checkbox_label"><input type="checkbox" id="dr-read-char" ${settings.readChar ? 'checked' : ''}><span>读取角色设定</span></label>
-                    <label class="checkbox_label"><input type="checkbox" id="dr-read-lore" ${settings.readLorebook ? 'checked' : ''}><span>读取激活的蓝灯世界书</span></label>
+                    <label class="checkbox_label"><input type="checkbox" id="dr-read-char" ${c.readChar ? 'checked' : ''}><span>读取角色设定</span></label>
+                    <label class="checkbox_label"><input type="checkbox" id="dr-read-lore" ${c.readLorebook ? 'checked' : ''}><span>读取激活的蓝灯世界书</span></label>
                     <label>读取聊天深度 (留空=全部未隐藏)</label>
-                    <input type="number" id="dr-read-depth" class="text_pole" value="${settings.readDepth}" min="0" placeholder="如 10">
+                    <input type="number" id="dr-read-depth" class="text_pole" value="${c.readDepth}" min="0" placeholder="如 10">
                 </div>
             </div>
 
@@ -320,8 +295,8 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <label>触发次数（用户输入）</label>
-                    <input type="number" id="dr-trigger-rounds" class="text_pole" value="${settings.triggerRounds}" min="1">
+                    <label>触发轮次 (User输入几次后触发)</label>
+                    <input type="number" id="dr-trigger-rounds" class="text_pole" value="${c.triggerRounds}" min="1">
                     <div class="dr-status" id="dr-status">${getStatusText()}</div>
                     <div style="margin-top: 10px;">
                         <input type="button" id="dr-btn-reset-counter" class="menu_button" value="重置计数器" title="手动重置进度计数">
@@ -335,7 +310,7 @@ function createUI() {
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content dr-section">
-                    <textarea id="dr-system-prompt" class="text_pole" rows="6" placeholder="对第二模型下达的指令">${settings.systemPrompt}</textarea>
+                    <textarea id="dr-system-prompt" class="text_pole" rows="6" placeholder="对第二模型下达的指令">${c.systemPrompt}</textarea>
                 </div>
             </div>
 
@@ -359,17 +334,14 @@ function createUI() {
     $("#dr-read-char").on("change", function() { save("readChar", this.checked); });
     $("#dr-read-lore").on("change", function() { save("readLorebook", this.checked); });
     $("#dr-read-depth").on("input", function() { save("readDepth", parseInt(this.value) || 0); });
-    $("#dr-trigger-rounds").on("input", function() {
-        save("triggerRounds", parseInt(this.value) || 1);
-        resetCounter(); // 修改触发轮次后重置计数
-        $("#dr-status").text(getStatusText());
-    });
+    $("#dr-trigger-rounds").on("input", function() { save("triggerRounds", parseInt(this.value) || 1); $("#dr-status").text(getStatusText()); });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
 
-    // 手动重置计数器按钮事件绑定
+    // 新增：手动重置计数器按钮
     $("#dr-btn-reset-counter").on("click", function() {
         if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
-            resetCounter(true); // 传入 true 同时清除 pendingAnalysis 状态
+            const currentUserCount = ctx().chat.filter(m => m.is_user && !m.is_hidden).length;
+            save("baselineUserCount", currentUserCount);
             $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
         }
     });
@@ -380,24 +352,15 @@ function createUI() {
         try { await callAPI("Hi"); alert("连接成功"); } catch(e) { alert("连接失败: " + e.message); }
     });
 
-    $("#dr-btn-analyze").on("click", () => {
-        pendingAnalysis = false; // 手动分析时取消待触发标记
-        runAnalysis(false);
-    });
-    $("#dr-btn-refresh").on("click", () => {
-        pendingAnalysis = false;
-        runAnalysis(true);
-    });
+    $("#dr-btn-analyze").on("click", () => runAnalysis(false));
+    $("#dr-btn-refresh").on("click", () => runAnalysis(true));
 }
 
 function init() {
     loadSettings();
     createUI();
-    // 监听用户发送消息事件（计数）
-    ctx().eventSource.on(ctx().event_types.MESSAGE_SENT, onUserMessage);
-    // 监听 AI 回复事件（实际触发分析）
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
-    console.log("[Director] 插件已加载 (v1.6 - 计数器修复与增强完整版)");
+    console.log("[Director] 插件已加载 (v1.6 - 计数器修复版)");
 }
 
 const waitAndInit = setInterval(() => {
