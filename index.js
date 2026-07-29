@@ -152,7 +152,7 @@ async function callAPI(prompt) {
             { role: "system", content: settings.systemPrompt },
             { role: "user", content: prompt }
         ],
-        temperature: 0.4,
+        temperature: 0.6,
         stream: false
     };
 
