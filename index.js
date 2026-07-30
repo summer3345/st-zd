@@ -3,7 +3,6 @@
  * SillyTavern 插件 - 引入第二模型进行复盘和场外指导
  * 整合 DeepSeek 建议并进一步优化状态管理与兼容性
  */
-
 const EXT_NAME = "director-review";
 const DEFAULTS = {
     enabled: false,
@@ -15,11 +14,9 @@ const DEFAULTS = {
     readDepth: 10,
     triggerRounds: 5,
     systemPrompt: "你是资深RP导演。请仔细阅读以下人设、世界书和聊天记录。找出Gemini在扮演中可能存在的OOC（人设崩塌）、逻辑漏洞或剧情拖沓问题。然后，给出具体、简短的下一步修正指导和剧情推进建议。只输出指导内容，不要废话。",
-    // 持久化的用户消息计数器
     userMessageCount: 0
 };
 
-// 模块级变量，管理待分析状态
 let pendingAnalysis = false;
 
 function ctx() {
@@ -40,7 +37,6 @@ function save(key, val) {
     ctx().saveSettingsDebounced();
 }
 
-// 进度计算基于持久化的计数器
 function getProgress() {
     const settings = ctx().extensionSettings[EXT_NAME];
     const trigger = settings.triggerRounds || 1;
@@ -87,40 +83,46 @@ async function fetchModels() {
     }
 }
 
-// 增强的世界书读取：兼容多种数据结构
+// 1. 修改：更稳健的世界书读取函数
 function getActiveWorldInfo() {
     const c = ctx();
-    if (!c.chat || c.chat.length === 0) return "";
-
-    const lastMsg = c.chat[c.chat.length - 1];
-    const activeUids = lastMsg?.extra?.world_info;
-    if (!activeUids || (typeof activeUids !== 'object' && !Array.isArray(activeUids))) return "";
-
+    if (!c.chat || c.chat.length === 0 || !c.world_info) return "";
     const worldInfo = c.world_info;
-    if (!worldInfo) return "";
-
     let text = "";
-
-    // 兼容 world_info 是对象的情况：{ uid: { content: ... } }
-    if (typeof worldInfo === 'object' && !Array.isArray(worldInfo)) {
-        const entries = worldInfo.entries || worldInfo;
-        for (const uid in activeUids) {
-            const entry = entries[uid];
-            if (entry && entry.content) {
-                text += entry.content + "\n\n";
+    
+    // 直接遍历 world_info 的 entries 数组（SillyTavern 标准结构）
+    if (worldInfo.entries && Array.isArray(worldInfo.entries)) {
+        for (const entry of worldInfo.entries) {
+            // 检查条目是否激活。激活状态可能存储在 extra 中或通过全局变量
+            const isActive = entry.is_active || 
+                             (entry.extra && entry.extra.world_info) ||
+                             (c.chat_metadata?.world_info_bindings?.[entry.uid]);
+            
+            if (isActive) {
+                const content = entry.content || "";
+                if (content.trim()) {
+                    text += content + "\n\n";
+                }
             }
         }
     }
-    // 兼容 world_info 是数组的情况：[ { uid: ..., content: ... } ]
-    else if (Array.isArray(worldInfo)) {
-        for (const uid in activeUids) {
-            const entry = worldInfo.find(e => e.uid == uid || e.id == uid);
-            if (entry && entry.content) {
-                text += entry.content + "\n\n";
+    
+    // 降级处理：如果上面没有获取到内容，尝试旧方法
+    if (!text && c.chat.length > 0) {
+        const lastMsg = c.chat[c.chat.length - 1];
+        if (lastMsg?.extra?.world_info) {
+            const activeUids = lastMsg.extra.world_info;
+            if (Array.isArray(activeUids) && worldInfo.entries) {
+                for (const uid of activeUids) {
+                    const entry = worldInfo.entries.find(e => e.uid == uid);
+                    if (entry && entry.content) {
+                        text += entry.content + "\n\n";
+                    }
+                }
             }
         }
     }
-
+    
     return text.trim();
 }
 
@@ -129,7 +131,6 @@ function getChatHistory(depth) {
     if (!c.chat) return "";
     let history = [];
     const startIdx = depth > 0 ? Math.max(0, c.chat.length - depth) : 0;
-
     for (let i = startIdx; i < c.chat.length; i++) {
         const msg = c.chat[i];
         if (msg.is_system) continue;
@@ -145,7 +146,6 @@ async function callAPI(prompt) {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.apiEndpoint || !settings.model) throw new Error("请先配置 API 和模型");
     const url = normalizeApiBase(settings.apiEndpoint) + "/chat/completions";
-
     const body = {
         model: settings.model,
         messages: [
@@ -155,7 +155,6 @@ async function callAPI(prompt) {
         temperature: 0.5,
         stream: false
     };
-
     const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -164,7 +163,6 @@ async function callAPI(prompt) {
         },
         body: JSON.stringify(body)
     });
-
     if (!res.ok) throw new Error("API Error: " + res.status + " " + (await res.text()).slice(0, 100));
     const data = await res.json();
     return data.choices[0].message.content.trim();
@@ -173,10 +171,8 @@ async function callAPI(prompt) {
 async function runAnalysis(isRefresh = false) {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled && !isRefresh) return;
-
     $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", true);
     $("#dr-status").html('<span class="dr-loader"></span> 正在分析上下文并生成指导...');
-
     try {
         let prompt = "";
         if (settings.readChar) {
@@ -188,76 +184,63 @@ async function runAnalysis(isRefresh = false) {
             if (wi) prompt += `【激活的世界书】\n${wi}\n\n`;
         }
         prompt += `【最近聊天记录】\n${getChatHistory(settings.readDepth)}`;
-
         const result = await callAPI(prompt);
-
         const chat = ctx().chat;
         if (chat.length > 0) {
             const lastIdx = chat.length - 1;
             const msg = chat[lastIdx];
-
             const tag = `\n\n<details class="dr-details"><summary>🎬 场外指导</summary>\n\n[System Note: 以下是被系统注入的场外导演指导，请参考修正，严禁你自己生成此标签]\n\n${result}\n\n</details>`;
             msg.mes = String(msg.mes || "").trimEnd() + tag;
             ctx().saveChat();
-
             const el = $(`#chat .mes[mesid="${lastIdx}"] .mes_text`);
             if (el.length) {
-                const formatted = ctx().messageFormatting
-                    ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user)
-                    : msg.mes;
+                const formatted = ctx().messageFormatting ? ctx().messageFormatting(msg.mes, msg.name, msg.is_system, msg.is_user) : msg.mes;
                 el.html(formatted);
             }
         }
-
-        // 分析完成后重置计数器并清除待分析标志
         resetCounter(true);
         $("#dr-status").text(getStatusText() + " | 上次分析已完成。");
     } catch (e) {
         console.error("[Director] Analysis error:", e);
         $("#dr-status").text("分析失败: " + e.message);
-        // 即使失败，也清除待分析标志，避免卡住
         pendingAnalysis = false;
     } finally {
         $("#dr-btn-analyze, #dr-btn-refresh").prop("disabled", false);
     }
 }
 
-// 重置计数器与待触发标志
 function resetCounter(clearPending = false) {
     const settings = ctx().extensionSettings[EXT_NAME];
-    settings.userMessageCount = 0; // 重置持久化计数器
-    save("userMessageCount", 0);    // 保存重置
+    settings.userMessageCount = 0;
+    save("userMessageCount", 0);
     if (clearPending) pendingAnalysis = false;
     $("#dr-status").text(getStatusText());
 }
 
-// 用户发送消息时调用 - 计数器累加
 function onUserMessage() {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled) return;
-
     settings.userMessageCount = (settings.userMessageCount || 0) + 1;
-    save("userMessageCount", settings.userMessageCount); // 持久化
-
+    save("userMessageCount", settings.userMessageCount);
     $("#dr-status").text(getStatusText());
-
-    // 检查是否达到触发条件
     if (settings.userMessageCount >= settings.triggerRounds) {
-        pendingAnalysis = true; // 设置待分析标志，等待 AI 回复后触发
+        pendingAnalysis = true;
     }
 }
 
-// AI 消息接收时调用 - 实际触发分析
+// 2. 修改：优化后的消息接收处理函数
 function onMessageReceived(idx) {
     const settings = ctx().extensionSettings[EXT_NAME];
     if (!settings.enabled || !pendingAnalysis) return;
-
     const msg = ctx().chat[idx];
-    if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
-
+    
+    // 放宽条件：允许系统消息和隐藏消息触发分析，但可选择性过滤
+    // if (!msg || msg.is_user || msg.is_system || msg.is_hidden) return;
+    if (!msg) return; // 只过滤空消息
+    
     // 立即清除标志，防止重复触发
     pendingAnalysis = false;
-
+    
     // 延迟 3 秒执行，确保主模型流式输出完全结束且 DOM 渲染完毕
     setTimeout(() => {
         runAnalysis(false);
@@ -279,7 +262,6 @@ function createUI() {
                     <span>启用自动纠偏</span>
                 </label>
             </div>
-
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>API 配置</b>
@@ -300,7 +282,6 @@ function createUI() {
                     </div>
                 </div>
             </div>
-
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>读取信息设置</b>
@@ -313,7 +294,6 @@ function createUI() {
                     <input type="number" id="dr-read-depth" class="text_pole" value="${settings.readDepth}" min="0" placeholder="如 10">
                 </div>
             </div>
-
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>触发设置</b>
@@ -328,7 +308,6 @@ function createUI() {
                     </div>
                 </div>
             </div>
-
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>纠偏提示词</b>
@@ -338,20 +317,17 @@ function createUI() {
                     <textarea id="dr-system-prompt" class="text_pole" rows="6" placeholder="对第二模型下达的指令">${settings.systemPrompt}</textarea>
                 </div>
             </div>
-
             <div class="dr-btn-group">
                 <input type="button" id="dr-btn-analyze" class="menu_button" value="立即进行分析">
                 <input type="button" id="dr-btn-refresh" class="menu_button" value="刷新最新纠偏">
             </div>
         </div>
     </div>`;
-
+    
     $("#extensions_settings2").append(html);
-
     $(".inline-drawer-toggle").on("click", function() {
         $(this).parent().toggleClass("inline-drawer-expanded");
     });
-
     $("#dr-enabled").on("change", function() { save("enabled", this.checked); });
     $("#dr-api-endpoint").on("input", function() { save("apiEndpoint", this.value); });
     $("#dr-api-key").on("input", function() { save("apiKey", this.value); });
@@ -361,27 +337,29 @@ function createUI() {
     $("#dr-read-depth").on("input", function() { save("readDepth", parseInt(this.value) || 0); });
     $("#dr-trigger-rounds").on("input", function() {
         save("triggerRounds", parseInt(this.value) || 1);
-        resetCounter(); // 修改触发轮次后重置计数
+        resetCounter();
         $("#dr-status").text(getStatusText());
     });
     $("#dr-system-prompt").on("input", function() { save("systemPrompt", this.value); });
-
-    // 手动重置计数器按钮事件绑定
+    
     $("#dr-btn-reset-counter").on("click", function() {
         if (confirm("确定要手动重置计数器吗？这将把当前进度归零。")) {
-            resetCounter(true); // 传入 true 同时清除 pendingAnalysis 状态
+            resetCounter(true);
             $("#dr-status").text(getStatusText() + " | 计数器已手动重置");
         }
     });
-
     $("#dr-btn-models").on("click", fetchModels);
     $("#dr-btn-test").on("click", async () => {
         save("model", $("#dr-model").val());
-        try { await callAPI("Hi"); alert("连接成功"); } catch(e) { alert("连接失败: " + e.message); }
+        try {
+            await callAPI("Hi");
+            alert("连接成功");
+        } catch(e) {
+            alert("连接失败: " + e.message);
+        }
     });
-
     $("#dr-btn-analyze").on("click", () => {
-        pendingAnalysis = false; // 手动分析时取消待触发标记
+        pendingAnalysis = false;
         runAnalysis(false);
     });
     $("#dr-btn-refresh").on("click", () => {
@@ -393,9 +371,7 @@ function createUI() {
 function init() {
     loadSettings();
     createUI();
-    // 监听用户发送消息事件（计数）
     ctx().eventSource.on(ctx().event_types.MESSAGE_SENT, onUserMessage);
-    // 监听 AI 回复事件（实际触发分析）
     ctx().eventSource.on(ctx().event_types.MESSAGE_RECEIVED, onMessageReceived);
     console.log("[Director] 插件已加载 (v1.6 - 计数器修复与增强完整版)");
 }
@@ -409,4 +385,5 @@ const waitAndInit = setInterval(() => {
         }
     }
 }, 300);
+
 
