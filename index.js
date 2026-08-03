@@ -152,7 +152,7 @@ async function callAPI(prompt) {
             { role: "system", content: settings.systemPrompt },
             { role: "user", content: prompt }
         ],
-        temperature: 0.5,
+        temperature: 0.4,
         stream: false
     };
     const res = await fetch(url, {
